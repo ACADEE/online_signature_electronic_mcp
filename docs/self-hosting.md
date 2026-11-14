@@ -91,6 +91,8 @@ Two optional settings in your repository on GitHub:
 
 To skip the pull request, run the workflow with **Merge straight into the production branch** ticked, or set the repository variable `SIGNUDOC_AUTO_MERGE` to `1` to have the weekly run do that. It only does so when the release merges cleanly. Vercel then deploys the update without anyone looking at it first.
 
+If Vercel deploys your site from a branch other than the repository's default branch, set the repository variable `SIGNUDOC_PRODUCTION_BRANCH` to that branch, so the workflow updates and opens pull requests against it.
+
 **A copy made before version 0.2.0** does not have the workflow yet. Add it once: in your repository on GitHub choose **Add file**, **Create new file**, name it `.github/workflows/update-signudoc.yml`, paste in [the workflow](https://raw.githubusercontent.com/NYLLON-SOFTWARE/SignuDoc/main/.github/workflows/update-signudoc.yml), and commit it to your production branch. Settings in SignuDoc links to the right page. Then run it as above.
 
 **Updating by hand.** A copy made by the Deploy button has none of this project's history, so a plain `git merge` refuses to merge "unrelated histories". Tell git which SignuDoc commit your copy started from, then merge as usual:

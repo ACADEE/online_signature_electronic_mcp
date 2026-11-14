@@ -26,6 +26,9 @@
 # run merge an update that applies cleanly straight into your production
 # branch instead of opening a pull request.
 #
+# If Vercel deploys from a branch other than the default branch, set the
+# repository variable SIGNUDOC_PRODUCTION_BRANCH to it.
+#
 # In the SignuDoc repository itself the job is skipped.
 
 name: Update SignuDoc
@@ -71,12 +74,14 @@ jobs:
       REQUESTED_VERSION: ${{ inputs.version }}
       BASED_ON: ${{ inputs.based_on }}
       MERGE_NOW: ${{ inputs.merge == true || vars.SIGNUDOC_AUTO_MERGE == '1' }}
-      BASE_BRANCH: ${{ github.event.repository.default_branch }}
+      # The branch Vercel deploys to production. Set the repository
+      # variable SIGNUDOC_PRODUCTION_BRANCH if it is not the default branch.
+      BASE_BRANCH: ${{ vars.SIGNUDOC_PRODUCTION_BRANCH || github.event.repository.default_branch }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          ref: ${{ github.event.repository.default_branch }}
+          ref: ${{ vars.SIGNUDOC_PRODUCTION_BRANCH || github.event.repository.default_branch }}
           token: ${{ secrets.SIGNUDOC_UPDATE_TOKEN || github.token }}
 
       - name: Merge the release into a branch
@@ -235,13 +240,20 @@ jobs:
               --merge-base="$base" HEAD "$target")
             merge_status=$?
             set -e
-            if [ "$merge_status" -eq 1 ]; then
+            clashes=$(tail -n +2 <<< "$merge_output" | sed '/^$/d')
+            # Workflow files are settled separately below when they are
+            # kept as they are (no token) or merged from where an earlier
+            # run left them, so a clash there does not stop the update.
+            if [ "$HAS_UPDATE_TOKEN" != "true" ] || [ "$wf_base" != "$base" ]; then
+              clashes=$(grep -v '^\.github/workflows/' <<< "$clashes" || true)
+            fi
+            if [ "$merge_status" -eq 1 ] && [ -n "$clashes" ]; then
               summary "## SignuDoc $tag clashes with changes in this repository" "" \
                 "These files were changed both here and in SignuDoc, in the same places:" ""
-              tail -n +2 <<< "$merge_output" | sed '/^$/d; s/^/- `/; s/$/`/' >> "$GITHUB_STEP_SUMMARY"
+              sed 's/^/- `/; s/$/`/' <<< "$clashes" >> "$GITHUB_STEP_SUMMARY"
               summary "" "To update by hand, see \"Keep your install up to date\" in docs/self-hosting.md. Use \`${base}\` as the SignuDoc commit this repository is based on."
               stop "SignuDoc $tag clashes with this repository's own changes. See the run summary."
-            elif [ "$merge_status" -ne 0 ]; then
+            elif [ "$merge_status" -gt 1 ]; then
               stop "git could not merge SignuDoc $tag."
             fi
             merged_tree=$(head -n 1 <<< "$merge_output")

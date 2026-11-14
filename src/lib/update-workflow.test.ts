@@ -466,6 +466,53 @@ test("adding the token later brings in the workflow files that were left", () =>
   assert.doesNotMatch(after.summary, /SIGNUDOC_UPDATE_TOKEN/);
 });
 
+test("workflow files left behind do not block the next release", () => {
+  const upstream = makeUpstream();
+  const { origin } = makeCopy(upstream);
+
+  assert.equal(runUpdate(checkout(origin), upstream).status, 0);
+  squashMerge(origin, "signudoc-update/v0.2.0");
+
+  // v0.3.0 changes the same line of ci.yml that this copy never took.
+  write(
+    upstream,
+    ".github/workflows/ci.yml",
+    "name: CI\non: [push, pull_request]\n",
+  );
+  write(upstream, "src/app.ts", "export const a = 1;\nexport const b = 4;\n");
+  git(upstream, "commit", "--quiet", "-am", "Third");
+  git(upstream, "tag", "v0.3.0");
+
+  const next = runUpdate(checkout(origin), upstream, { version: "v0.3.0" });
+
+  assert.equal(next.status, 0, next.stderr + next.summary);
+  assert.equal(
+    show(origin, "signudoc-update/v0.3.0", "src/app.ts"),
+    "export const a = 1;\nexport const b = 4;",
+  );
+  assert.equal(
+    show(origin, "signudoc-update/v0.3.0", ".github/workflows/ci.yml"),
+    "name: CI",
+  );
+
+  // And with the token, both releases' workflow changes arrive at once.
+  squashMerge(origin, "signudoc-update/v0.3.0");
+  const withToken = runUpdate(checkout(origin), upstream, {
+    hasToken: true,
+    version: "v0.3.0",
+  });
+
+  assert.equal(withToken.status, 0, withToken.stderr + withToken.summary);
+  assert.equal(
+    show(
+      origin,
+      "signudoc-update/v0.3.0-workflows",
+      ".github/workflows/ci.yml",
+    ),
+    "name: CI\non: [push, pull_request]",
+  );
+});
+
 test("an unclear starting point stops, and based_on settles it", () => {
   // Two SignuDoc commits equally far from the copy's edited first commit.
   const upstream = path.join(scratch, `upstream-${String((counter += 1))}`);
