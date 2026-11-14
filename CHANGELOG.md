@@ -15,6 +15,8 @@ organization deploys to its own Vercel account and runs on free plans.
 
 - One-click **Deploy to Vercel** button that provisions Neon Postgres, Vercel
   Blob and Resend from the Vercel Marketplace, all on their free plans.
+  Vercel keeps its free Hobby plan for personal, non-commercial use, so a
+  company belongs on Vercel Pro ($20 a month, whatever its size).
 - Setup wizard on first visit: creates the first administrator, asks for the
   install's own support email, and fills in the email sending domain (with a
   `sign.` subdomain by default).
