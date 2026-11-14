@@ -200,7 +200,12 @@ type RunResult = {
 function runUpdate(
   dir: string,
   upstream: string,
-  options: { hasToken?: boolean; mergeNow?: boolean; version?: string } = {},
+  options: {
+    basedOn?: string;
+    hasToken?: boolean;
+    mergeNow?: boolean;
+    version?: string;
+  } = {},
 ): RunResult & { gh: string; prBody: string } {
   const gh = makeGhStub(upstream);
   const temp = mkdtempSync(path.join(scratch, "runner-"));
@@ -213,6 +218,7 @@ function runUpdate(
   const env = {
     ...gitEnv,
     BASE_BRANCH: "main",
+    BASED_ON: options.basedOn ?? "",
     GITHUB_OUTPUT: outputFile,
     GITHUB_REPOSITORY: "acme/signudoc",
     GITHUB_SERVER_URL: "https://github.com",
@@ -403,30 +409,98 @@ test("a clash stops the run and names the files", () => {
   assert.equal(git(origin, "branch", "--list", "signudoc-update/*"), "");
 });
 
+/** Merges the pull request the way GitHub's squash button does. */
+function squashMerge(origin: string, branch: string) {
+  const dir = checkout(origin);
+  const message = git(dir, "log", "-1", "--format=%B", `origin/${branch}`);
+
+  git(dir, "merge", "--quiet", "--squash", `origin/${branch}`);
+  git(dir, "commit", "--quiet", "-m", `Update SignuDoc (#1)\n\n* ${message}`);
+  git(dir, "push", "--quiet", "origin", "main");
+  // GitHub keeps the branch unless the repository deletes merged branches.
+}
+
 test("once the pull request is merged, the next run is up to date", () => {
   const upstream = makeUpstream();
   const { origin } = makeCopy(upstream);
 
   assert.equal(runUpdate(checkout(origin), upstream).status, 0);
-  // Merged the way GitHub's squash button does: a new commit, same files.
-  const dir = checkout(origin);
-
-  git(dir, "merge", "--quiet", "--squash", "origin/signudoc-update/v0.2.0");
-  git(
-    dir,
-    "commit",
-    "--quiet",
-    "-m",
-    `Update SignuDoc to v0.2.0 (#1)\n\nSignuDoc-Commit: ${git(upstream, "rev-parse", "v0.2.0")}`,
-  );
-  git(dir, "push", "--quiet", "origin", "main");
-  git(dir, "push", "--quiet", "origin", "--delete", "signudoc-update/v0.2.0");
+  squashMerge(origin, "signudoc-update/v0.2.0");
 
   const again = runUpdate(checkout(origin), upstream);
 
   assert.equal(again.status, 0, again.stderr);
   assert.equal(again.output.branch, undefined);
   assert.match(again.summary, /Already up to date with SignuDoc v0\.2\.0/);
+  // The workflow file it left alone is still pointed out.
+  assert.match(again.summary, /SIGNUDOC_UPDATE_TOKEN/);
+});
+
+test("adding the token later brings in the workflow files that were left", () => {
+  const upstream = makeUpstream();
+  const { origin } = makeCopy(upstream);
+
+  assert.equal(runUpdate(checkout(origin), upstream).status, 0);
+  squashMerge(origin, "signudoc-update/v0.2.0");
+
+  const withToken = runUpdate(checkout(origin), upstream, { hasToken: true });
+
+  assert.equal(withToken.status, 0, withToken.stderr);
+  assert.equal(withToken.output.branch, "signudoc-update/v0.2.0-workflows");
+  const branch = "signudoc-update/v0.2.0-workflows";
+
+  assert.equal(
+    show(origin, branch, ".github/workflows/ci.yml"),
+    "name: CI\non: push",
+  );
+  assert.equal(
+    git(origin, "diff", "--name-only", "main", branch),
+    ".github/workflows/ci.yml",
+  );
+
+  squashMerge(origin, branch);
+  const after = runUpdate(checkout(origin), upstream, { hasToken: true });
+
+  assert.equal(after.status, 0, after.stderr);
+  assert.match(after.summary, /Already up to date/);
+  assert.doesNotMatch(after.summary, /SIGNUDOC_UPDATE_TOKEN/);
+});
+
+test("an unclear starting point stops, and based_on settles it", () => {
+  // Two SignuDoc commits equally far from the copy's edited first commit.
+  const upstream = path.join(scratch, `upstream-${String((counter += 1))}`);
+
+  mkdirSync(upstream);
+  git(upstream, "init", "--quiet", "--initial-branch=main");
+  write(upstream, "src/app.ts", "export const b = 1;\n");
+  git(upstream, "add", ".");
+  git(upstream, "commit", "--quiet", "-m", "One");
+  git(upstream, "tag", "v0.1.0");
+  write(upstream, "src/app.ts", "export const b = 2;\n");
+  git(upstream, "commit", "--quiet", "-am", "Two");
+  write(upstream, "src/new.ts", "export const n = 1;\n");
+  git(upstream, "add", ".");
+  git(upstream, "commit", "--quiet", "-m", "Three");
+  git(upstream, "tag", "v0.2.0");
+
+  const { origin } = makeCopy(upstream, undefined, (dir) => {
+    write(dir, "src/app.ts", "export const b = 9;\n");
+  });
+  const unclear = runUpdate(checkout(origin), upstream);
+
+  assert.equal(unclear.status, 1);
+  assert.match(unclear.summary, /equally close/);
+
+  const settled = runUpdate(checkout(origin), upstream, { basedOn: "0.1.0" });
+
+  assert.equal(settled.status, 1);
+  // From v0.1.0, SignuDoc changed the line this copy changed too.
+  assert.match(settled.summary, /- `src\/app\.ts`/);
+
+  const wrong = runUpdate(checkout(origin), upstream, { basedOn: "v9.9.9" });
+
+  assert.equal(wrong.status, 1);
+  assert.match(wrong.summary, /has no release or commit/);
 });
 
 test("a copy that is already on the latest release is up to date", () => {

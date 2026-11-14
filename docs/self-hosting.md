@@ -79,6 +79,7 @@ Using it costs nothing: a run takes well under a minute, and private repositorie
 What the workflow does and does not do:
 
 - **Your changes are kept.** It does a three-way merge between the SignuDoc version your copy is based on, your copy, and the new release, so code you changed stays changed. Where you and SignuDoc changed the same lines, it stops without touching anything and lists the files in the run's summary. Then update by hand, below.
+- **It works out which SignuDoc version your copy started from** by comparing its first commit with this project's history. If the first commit was edited and two versions fit equally well, the run stops and asks you to run it again with **Based on** set to the release you deployed, such as `v0.1.0`.
 - **It never force-pushes** and never changes your production branch unless you ask it to (below). Everything arrives as a pull request.
 - **Database changes wait for the merge.** Preview builds do not touch the database (they share it with production unless you set `MIGRATE_ON_PREVIEW=1`), so a preview of an update that changes the database may show errors on pages that need the change. The pull request says when an update changes the database. Merging applies it during the production build. A database change stays if you later roll the site back to an older deployment, so do not roll back across an update that changed the database.
 - **Files in `.github/workflows` are left alone.** GitHub does not let a workflow's own token change workflow files. When a release changes one, the pull request lists it, and you can copy it from the release by hand. To have the workflow update them too, add the token below.
@@ -86,7 +87,7 @@ What the workflow does and does not do:
 Two optional settings in your repository on GitHub:
 
 - **Let the workflow open the pull request.** In Settings, Actions, General, under Workflow permissions, tick **Allow GitHub Actions to create and approve pull requests**. Without it the workflow pushes the branch and its summary links to the page where you open the pull request with one click.
-- **`SIGNUDOC_UPDATE_TOKEN`**, a repository secret (Settings, Secrets and variables, Actions). Make a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) for your copy only, with read and write access to Contents, Pull requests and Workflows. The workflow uses it instead of its own token, so it can update workflow files and does not need the setting above.
+- **`SIGNUDOC_UPDATE_TOKEN`**, a repository secret (Settings, Secrets and variables, Actions). Make a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) for your copy only, with read and write access to Contents, Pull requests and Workflows. The workflow uses it instead of its own token, so it can update workflow files and does not need the setting above. Added after an update left workflow files behind, the next run brings them in with a pull request of their own.
 
 To skip the pull request, run the workflow with **Merge straight into the production branch** ticked, or set the repository variable `SIGNUDOC_AUTO_MERGE` to `1` to have the weekly run do that. It only does so when the release merges cleanly. Vercel then deploys the update without anyone looking at it first.
 
