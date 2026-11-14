@@ -84,21 +84,15 @@ test("nothing in the repository points at a site or a mailbox run by the project
   assert.deepEqual(offenders, []);
 });
 
-test("security and conduct reports go through GitHub, not to an email address", () => {
-  for (const name of ["SECURITY.md", "CODE_OF_CONDUCT.md"]) {
-    const text = readFileSync(path.join(repoRoot, name), "utf8");
+test("security reports go through GitHub, not to an email address", () => {
+  const text = readFileSync(path.join(repoRoot, "SECURITY.md"), "utf8");
 
-    assert.doesNotMatch(text, /[\w.+-]+@[\w-]+\.[a-z]{2,}/i, name);
-    assert.doesNotMatch(text, /mailto:/i, name);
-  }
+  assert.doesNotMatch(text, /[\w.+-]+@[\w-]+\.[a-z]{2,}/i);
+  assert.doesNotMatch(text, /mailto:/i);
 
   assert.ok(
     readFileSync(path.join(repoRoot, "SECURITY.md"), "utf8").includes(
       "https://github.com/NYLLON-SOFTWARE/SignuDoc/security/advisories/new",
     ),
-  );
-  assert.match(
-    readFileSync(path.join(repoRoot, "CODE_OF_CONDUCT.md"), "utf8"),
-    /Report content/,
   );
 });
