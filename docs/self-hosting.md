@@ -64,25 +64,49 @@ After this, preview deployments have no database and open on the page that asks 
 
 ### Keep your install up to date
 
-The Deploy button makes a copy of this repository, and a copy does not receive new versions by itself. To take a new version, bring the changes into your copy and push. Vercel builds the push, and the build applies any new database migrations.
+The Deploy button makes a copy of this repository in your GitHub account, and Vercel deploys every push to it. A copy does not receive new versions by itself: an update means bringing a new [release](https://github.com/NYLLON-SOFTWARE/SignuDoc/releases) into your copy. Vercel then builds it, and the production build applies any new database migrations.
+
+**See whether there is one.** Sign in as the administrator and open Settings. The SignuDoc section shows the version the site runs; **Check for updates** asks GitHub for the latest release and shows what is new in it.
+
+**Take it with the update workflow.** Your copy has a GitHub Actions workflow, `.github/workflows/update-signudoc.yml`, that does the git work for you:
+
+1. In your repository on GitHub, open **Actions**, then **Update SignuDoc**, and press **Run workflow**. (Settings in SignuDoc links straight there.) It also runs by itself every Monday.
+2. It merges the release with your copy on a branch named `signudoc-update/<version>` and opens a pull request. Vercel builds a preview of that branch.
+3. Look at the preview, then merge the pull request. Vercel deploys it to your site.
+
+Using it costs nothing: a run takes well under a minute, and private repositories get 2,000 free Actions minutes a month.
+
+What the workflow does and does not do:
+
+- **Your changes are kept.** It does a three-way merge between the SignuDoc version your copy is based on, your copy, and the new release, so code you changed stays changed. Where you and SignuDoc changed the same lines, it stops without touching anything and lists the files in the run's summary. Then update by hand, below.
+- **It never force-pushes** and never changes your production branch unless you ask it to (below). Everything arrives as a pull request.
+- **Database changes wait for the merge.** Preview builds do not touch the database (they share it with production unless you set `MIGRATE_ON_PREVIEW=1`), so a preview of an update that changes the database may show errors on pages that need the change. The pull request says when an update changes the database. Merging applies it during the production build. A database change stays if you later roll the site back to an older deployment, so do not roll back across an update that changed the database.
+- **Files in `.github/workflows` are left alone.** GitHub does not let a workflow's own token change workflow files. When a release changes one, the pull request lists it, and you can copy it from the release by hand. To have the workflow update them too, add the token below.
+
+Two optional settings in your repository on GitHub:
+
+- **Let the workflow open the pull request.** In Settings, Actions, General, under Workflow permissions, tick **Allow GitHub Actions to create and approve pull requests**. Without it the workflow pushes the branch and its summary links to the page where you open the pull request with one click.
+- **`SIGNUDOC_UPDATE_TOKEN`**, a repository secret (Settings, Secrets and variables, Actions). Make a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) for your copy only, with read and write access to Contents, Pull requests and Workflows. The workflow uses it instead of its own token, so it can update workflow files and does not need the setting above.
+
+To skip the pull request, run the workflow with **Merge straight into the production branch** ticked, or set the repository variable `SIGNUDOC_AUTO_MERGE` to `1` to have the weekly run do that. It only does so when the release merges cleanly. Vercel then deploys the update without anyone looking at it first.
+
+**A copy made before version 0.2.0** does not have the workflow yet. Add it once: in your repository on GitHub choose **Add file**, **Create new file**, name it `.github/workflows/update-signudoc.yml`, paste in [the workflow](https://raw.githubusercontent.com/NYLLON-SOFTWARE/SignuDoc/main/.github/workflows/update-signudoc.yml), and commit it to your production branch. Settings in SignuDoc links to the right page. Then run it as above.
+
+**Updating by hand.** A copy made by the Deploy button has none of this project's history, so a plain `git merge` refuses to merge "unrelated histories". Tell git which SignuDoc commit your copy started from, then merge as usual:
 
 ```bash
 git clone https://github.com/<your-account>/signudoc.git
 cd signudoc
-git remote add upstream https://github.com/NYLLON-SOFTWARE/SignuDoc.git
-git fetch upstream
-git merge upstream/main
+git fetch https://github.com/NYLLON-SOFTWARE/SignuDoc.git main --tags
+# The SignuDoc commit your copy started from. The workflow's summary
+# names it when it stops, or use the release tag you deployed, e.g. v0.1.0.
+git replace --graft "$(git rev-list --max-parents=0 HEAD)" v0.1.0
+git merge v0.2.0
+# Fix any clashes, commit, then:
 git push
 ```
 
-If git answers `refusing to merge unrelated histories`, your copy was made without this project's history. As long as you have not changed the code yourself, take the new version as it is:
-
-```bash
-git reset --hard upstream/main
-git push --force-with-lease
-```
-
-After that first time, `git merge upstream/main` works as above.
+The graft only lives in your local clone. The merge itself is a normal commit that links the two histories, so later updates merge without it.
 
 ### Optional settings
 
