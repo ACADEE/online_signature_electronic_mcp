@@ -1,9 +1,11 @@
 import { OrganizationSettings } from "@/components/settings/organization-settings";
 import { SettingsShell } from "@/components/settings/settings-shell";
+import { UpdatesPanel } from "@/components/settings/updates-panel";
 import { isAdminUser } from "@/lib/auth/admin";
 import { getAuthSession } from "@/lib/auth/server";
 import { toOrganizationSettingsView } from "@/lib/organization-settings";
 import { readStoredSettings, resolveSettings } from "@/lib/settings";
+import { getUpdateStatus } from "@/lib/software-update";
 
 export default async function SettingsPage() {
   const session = await getAuthSession();
@@ -26,6 +28,7 @@ export default async function SettingsPage() {
           )}
         />
       ) : null}
+      {isAdmin ? <UpdatesPanel initialStatus={getUpdateStatus(null)} /> : null}
     </div>
   );
 }

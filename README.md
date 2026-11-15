@@ -200,6 +200,8 @@ DocuSign's figures are its US list prices for annual plans in November 2026: $30
 4. **Open your new site.** Name your organization, give the email address people should write to for help, and create the first account, which is the administrator.
 5. **Set up the address you send from.** Under Settings, Organization, enter an address at your own domain. The site lists the DNS records to add and checks them for you.
 
+**Taking new versions.** Settings, SignuDoc, **Check for updates** tells you when a new release is out and what is in it. A workflow that comes with your copy then opens a pull request with the release in your GitHub repository; merge it and Vercel deploys the update. See [Keep your install up to date](docs/self-hosting.md#keep-your-install-up-to-date).
+
 There is nothing to type in Vercel and no terminal to open. Until step 5 is done, email reaches only the address on your Resend account, so you can try the whole product straight away by sending a document to yourself. The [self-hosting guide](docs/self-hosting.md) covers your own domain, locking down a new install, keeping it up to date, running in the EU, and every optional setting.
 
 ### Try it on your computer
