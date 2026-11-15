@@ -6,6 +6,46 @@ All notable changes to SignuDoc are recorded here. The format follows
 change settings or the database in ways that need a migration step; each
 release says when it does.
 
+## [0.2.0] - 2026-11-15
+
+Installs can now find and take new releases without using git. No database
+change: this release needs no migration step.
+
+### Keeping an install up to date
+
+- **Check for updates** in Settings, SignuDoc (administrators only): shows
+  the version the site runs, asks GitHub for the latest release, and shows
+  what is new in it.
+- **Update SignuDoc workflow** (`.github/workflows/update-signudoc.yml`) in
+  each copy: runs every Monday or by hand, merges the new release with the
+  copy on a `signudoc-update/<version>` branch and opens a pull request, so
+  Vercel builds a preview first. Changes you made to the code are kept; where
+  you and SignuDoc changed the same lines it stops and lists the files. It
+  never force-pushes.
+- Optional settings for the workflow: a `SIGNUDOC_UPDATE_TOKEN` secret so it
+  can update workflow files too, `SIGNUDOC_AUTO_MERGE=1` to merge clean
+  updates straight into production, and `SIGNUDOC_PRODUCTION_BRANCH` when
+  Vercel deploys from a branch other than the default one.
+- `docs/self-hosting.md` explains the workflow and a by-hand update for a
+  Deploy-button copy, which shares no history with this project.
+
+### Upgrading from 0.1.0
+
+A copy made from 0.1.0 does not have the update workflow yet. Add
+`.github/workflows/update-signudoc.yml` to it once (Settings in SignuDoc
+links to the right page, and `docs/self-hosting.md` has the steps), then run
+it. If it asks which version you deployed, use `v0.1.0`.
+
+### Other changes
+
+- The Code of Conduct file is removed.
+
+### Not yet verified
+
+- The update workflow is tested in CI against stand-in repositories. A real
+  run in a Deploy-button copy has not been done yet.
+- Everything listed under 0.1.0 as not yet verified still is.
+
 ## [0.1.0] - 2026-11-14
 
 The first open-source release. SignuDoc is an e-signature platform that an
@@ -77,4 +117,5 @@ checked against the real services:
 
 SignuDoc is software, not legal advice. See the README's legal disclaimer.
 
+[0.2.0]: https://github.com/NYLLON-SOFTWARE/SignuDoc/releases/tag/v0.2.0
 [0.1.0]: https://github.com/NYLLON-SOFTWARE/SignuDoc/releases/tag/v0.1.0
