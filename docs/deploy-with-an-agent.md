@@ -12,7 +12,8 @@ The person you are working for is called "the person" below.
   1. **The domain email should come from**, for example `acme.com`. SignuDoc suggests a `sign.` subdomain (`sign.acme.com`) so its email stays apart from the organization's own. If they have no domain yet, email can wait: leave Resend's domain question at its default.
   2. **The organization's name**, as signers should see it.
   3. **The support email address** signers and staff should write to for help.
-  4. **The administrator's email address.** The person creates the password themselves at step 6, or tells you to use their password manager.
+  4. **The administrator's name and email address.** The person creates the password themselves at step 6, or tells you to use their password manager.
+  5. **Whether they want to try email before their domain is verified.** If so, leave the sender address empty at step 6 (see step 7).
 - Do one step at a time, and check each result on the page before you move on. Vercel changes its wording from time to time, so match screens by what they do, not by exact text.
 
 ## 1. Open the Deploy button
@@ -61,8 +62,8 @@ Open the production address (`https://<project>.vercel.app`, or the "Visit" link
 On the setup page:
 
 1. Enter the **organization's name** and the **support email address**.
-2. **Send email from** is filled in from what the site knows, usually `notifications@sign.<their domain>`. Check it against the domain the person gave you, and correct it if needed.
-3. Enter the **administrator's email**. Let the person type the password, or use their password manager if they told you to. Never make one up and keep it.
+2. **Send email from** is filled in from what the site knows, usually `notifications@sign.<their domain>`. Check it against the domain the person gave you, and correct it if needed. If the person wants to try email before the domain is verified, clear it instead; it can be set later under Settings, Organization.
+3. Enter the **administrator's name** and **email**. Let the person type the password, or use their password manager if they told you to. Never make one up and keep it.
 4. Finish setup. You are signed in as the administrator.
 
 ## 7. Check email
@@ -73,7 +74,7 @@ Open **Settings, Organization** and find the email section.
 - **DNS records listed, not yet verified.** The domain's records are not in place yet. If the domain is managed somewhere other than Vercel, give the person the list of records to add where their domain is managed. The page checks them again by itself. This can take from minutes to a few hours.
 - **Verified.** Email is ready.
 
-Until the domain is verified, Resend delivers only to the email address of the Resend account, so the person can still try SignuDoc by sending a document to themselves.
+Once a sender address is saved, every email goes out from it, and Resend refuses to send from it until its domain is verified, even to the person's own address. To try SignuDoc before that, the sender address must be empty: mail then goes out from Resend's test address, which delivers only to the email address of the Resend account, so the person can send a document to themselves.
 
 ## 8. Report back
 
