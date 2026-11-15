@@ -18,16 +18,28 @@ Everything about running your own SignuDoc: deploying it, setting it up, what it
 1. **Click "Deploy with Vercel"** in the [README](../README.md).
 2. **Sign in to Vercel** and let it copy this repository into your GitHub account. Your site is built from that copy.
 3. **Add the three things Vercel offers to create.** Each has a free plan:
+   - [Resend](https://resend.com) for sending email (it comes first because its domain takes the longest to be ready),
    - a Postgres database from [Neon](https://neon.com) (pick the region closest to you),
-   - a private file store, [Vercel Blob](https://vercel.com/docs/vercel-blob), for the documents,
-   - [Resend](https://resend.com) for sending email.
-4. **Click Deploy.** The build creates the database tables by itself.
+   - a private file store, [Vercel Blob](https://vercel.com/docs/vercel-blob), for the documents.
+4. **Click Deploy.** The build creates the database tables by itself. If it stops with "One or more integration resources failed to provision", see [If the first deployment fails](#if-the-first-deployment-fails).
 5. **Open your new site.** It takes you to a setup page, where you name your organization, give the email address people should write to for help, and create the first account. That account is the administrator.
 6. **Set up the address you send from.** Under Settings, Organization, enter an address at your own domain in "Send email from" and save (the setup page offers the same field). The site lists the DNS records for that domain and checks them for you. Add them where your domain is managed. If your Resend key is not allowed to manage domains, the page sends you to Resend's dashboard for this step instead.
 
 ![The setup page of a new install](images/setup.png)
 
 Step 6 is the one part that cannot be done for you: every email provider asks for proof that you own the domain you send from. While "Send email from" is empty, email goes out from Resend's test address, which Resend delivers only to the email address of the Resend account itself, normally the one on your Vercel account. So to try the whole product straight away, leave that field empty and send a document to that address. Once you save an address of your own, email is sent from it, and Resend does not deliver it until the domain shows as verified. Add the records before you count on it.
+
+### If the first deployment fails
+
+Vercel starts the first deployment as soon as the last store is added. Resend asks for a domain, sets it up and then checks its DNS records, and that can take a few minutes. If the deployment starts before Resend is ready, Vercel stops it before the build begins, with "One or more integration resources failed to provision". Your copy of SignuDoc is fine, and the database, file store and email are all created.
+
+1. Wait a minute or two.
+2. Refresh the page. In the Vercel project, Storage lists Resend, Neon and Blob.
+3. Open Deployments, open the failed deployment's menu (⋯), and click **Redeploy**.
+
+If it fails the same way again, wait a few more minutes and redeploy once more. A deployment that fails during the build, with a log, is a different problem: the log says what went wrong.
+
+The build itself never waits on Resend. SignuDoc builds and runs without email, and Settings, Organization says when email is not connected yet.
 
 If the site opens on a page that says to connect a database, the database was not connected when the site was built. Connect it under Storage in the Vercel project, deploy again and reload.
 

@@ -39,6 +39,17 @@ test("the button creates the database, the private file store and email", () => 
   );
 
   assert.deepEqual(stores, [
+    // Resend comes first. Vercel shows the stores in this order, and the
+    // first deployment starts as soon as the last one is added. Resend's
+    // sending domain takes the longest to be ready, and a deployment that
+    // starts before it is fails with "One or more integration resources
+    // failed to provision", so Resend gets the time the other two take.
+    {
+      integrationSlug: "resend",
+      productSlug: "resend-email",
+      protocol: "messaging",
+      type: "integration",
+    },
     {
       integrationSlug: "neon",
       productSlug: "neon",
@@ -47,13 +58,25 @@ test("the button creates the database, the private file store and email", () => 
     },
     // Private, so no document ever has a public address.
     { access: "private", type: "blob" },
-    {
-      integrationSlug: "resend",
-      productSlug: "resend-email",
-      protocol: "messaging",
-      type: "integration",
-    },
   ]);
+});
+
+test("the agent deploy guide opens the same link as the button", () => {
+  const guide = readFileSync(
+    path.join(repoRoot, "docs", "deploy-with-an-agent.md"),
+    "utf8",
+  );
+  const match = /https:\/\/vercel\.com\/new\/clone\?\S+/.exec(guide);
+
+  assert.ok(match, "docs/deploy-with-an-agent.md has no Deploy link");
+
+  const guideStores = new URL(match[0]).searchParams.get("stores");
+
+  assert.equal(guideStores, readDeployLink().searchParams.get("stores"));
+  assert.equal(
+    new URL(match[0]).searchParams.get("repository-url"),
+    readDeployLink().searchParams.get("repository-url"),
+  );
 });
 
 test("the button asks for nothing to be typed in, and carries no values", () => {
@@ -98,6 +121,7 @@ test("every picture and page the README and the guides link to is in the reposit
   for (const document of [
     "README.md",
     "docs/self-hosting.md",
+    "docs/deploy-with-an-agent.md",
     "docs/development.md",
     "docs/part11/README.md",
     "docs/part11/traceability-matrix.md",
