@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-// The "Deploy with Vercel" button in the README is one long link, and a
+// The "Deploy to Vercel" button in the README is one long link, and a
 // slip in it is easy to make and hard to see. These tests read the link
 // back and check what it asks Vercel to do.
 // https://vercel.com/docs/deploy-button/source
@@ -17,7 +17,7 @@ function readDeployLink(): URL {
   const match =
     /(?:\]\(|href=")(https:\/\/vercel\.com\/new\/clone\?[^)"\s]+)/.exec(readme);
 
-  assert.ok(match?.[1], "README.md has no Deploy with Vercel link");
+  assert.ok(match?.[1], "README.md has no Deploy to Vercel link");
 
   return new URL(match[1]);
 }
