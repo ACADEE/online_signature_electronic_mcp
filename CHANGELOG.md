@@ -72,8 +72,9 @@ the end of this entry.
 
 This release changes the database (`20261115100000_copied_audit_event.sql`,
 `20261116100000_signer_corrected.sql`, `20261117090000_sign_in_security.sql`,
-`20261117100000_session_controls.sql`), which the production build applies.
-No step is needed by hand.
+`20261117100000_session_controls.sql`). On Vercel the production build
+applies them, so nothing is needed by hand. On other hosts, run
+`npm run db:migrate` as on every deploy.
 
 ## [0.2.1] - 2026-11-16
 
