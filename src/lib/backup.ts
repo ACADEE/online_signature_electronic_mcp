@@ -309,6 +309,13 @@ function databaseBackupPath(createdAt: Date): string {
 }
 
 type Manifest = {
+  /**
+   * For each copied file, the original's upload time as listed just before
+   * it was read. A copy counts as current only while the original still
+   * shows that time and size, so an original overwritten during or after a
+   * copy is copied again on the next run.
+   */
+  copiedFrom: Record<string, string>;
   /** Backed-up files whose original was found missing, and since when. */
   missingSince: Record<string, string>;
   version: 1;
@@ -321,13 +328,17 @@ async function readManifest(store: BackupStore): Promise<Manifest> {
   const found = await store.get(MANIFEST_PATH);
 
   if (!found) {
-    return { missingSince: {}, version: 1 };
+    return { copiedFrom: {}, missingSince: {}, version: 1 };
   }
 
   const text = await new Response(found.stream).text();
   const parsed = JSON.parse(text) as Partial<Manifest>;
 
-  return { missingSince: parsed.missingSince ?? {}, version: 1 };
+  return {
+    copiedFrom: parsed.copiedFrom ?? {},
+    missingSince: parsed.missingSince ?? {},
+    version: 1,
+  };
 }
 
 export type BackupSummary = {
@@ -362,12 +373,28 @@ export async function runBackup({
 
   // pipeline() passes a failed export on to the upload, so it ends with
   // that error rather than waiting for data that will not come.
+  // If the upload fails first, the export is stopped and waited for, so
+  // its snapshot transaction and connection are let go before this returns.
   const compressed = createGzip();
+  const exporting = pipeline(
+    Readable.from(exportDatabaseLines(database, now)),
+    compressed,
+  );
 
-  await Promise.all([
-    pipeline(Readable.from(exportDatabaseLines(database, now)), compressed),
-    target.put(databaseBackup, compressed, { contentType: "application/gzip" }),
-  ]);
+  try {
+    await Promise.all([
+      exporting,
+      target.put(databaseBackup, compressed, {
+        contentType: "application/gzip",
+      }),
+    ]);
+  } catch (error) {
+    compressed.destroy(
+      error instanceof Error ? error : new Error(String(error)),
+    );
+    await exporting.catch(() => undefined);
+    throw error;
+  }
 
   const cutoff = now.getTime() - keepDays * DAY_MS;
   const databaseCopies = (await listAll(target, DATABASE_PREFIX)).sort((a, b) =>
@@ -381,7 +408,18 @@ export async function runBackup({
   await target.delete(expiredCopies);
 
   // 2. The files.
+  const manifest = await readManifest(target);
   const originals = await listAll(source);
+  // Carried over for files this run does not reach before its deadline.
+  const copiedFrom: Record<string, string> = {};
+
+  for (const original of originals) {
+    const earlier = manifest.copiedFrom[original.pathname];
+
+    if (earlier) {
+      copiedFrom[original.pathname] = earlier;
+    }
+  }
   const copies = new Map(
     (await listAll(target, FILES_PREFIX)).map((blob) => [
       blob.pathname.slice(FILES_PREFIX.length),
@@ -400,11 +438,12 @@ export async function runBackup({
 
   for (const original of originals) {
     const copy = copies.get(original.pathname);
+    const version = original.uploadedAt.toISOString();
 
     if (
       copy &&
       copy.size === original.size &&
-      copy.uploadedAt.getTime() >= original.uploadedAt.getTime()
+      manifest.copiedFrom[original.pathname] === version
     ) {
       summary.filesUnchanged += 1;
       continue;
@@ -414,6 +453,9 @@ export async function runBackup({
       summary.stoppedEarly = true;
       break;
     }
+
+    // Until this copy is done, the one in the backup is not this version.
+    delete copiedFrom[original.pathname];
 
     try {
       const found = await source.get(original.pathname);
@@ -425,6 +467,7 @@ export async function runBackup({
       await target.put(`${FILES_PREFIX}${original.pathname}`, found.stream, {
         contentType: found.contentType,
       });
+      copiedFrom[original.pathname] = version;
       summary.filesCopied += 1;
     } catch (error) {
       summary.fileFailures.push(original.pathname);
@@ -436,7 +479,6 @@ export async function runBackup({
   }
 
   // 3. Copies whose original is gone, kept keepDays days after it went.
-  const manifest = await readManifest(target);
   const present = new Set(originals.map((blob) => blob.pathname));
   const missingSince: Record<string, string> = {};
   const toRemove: string[] = [];
@@ -459,7 +501,7 @@ export async function runBackup({
   summary.filesRemoved = toRemove.length;
   await target.put(
     MANIFEST_PATH,
-    JSON.stringify({ missingSince, version: 1 } satisfies Manifest),
+    JSON.stringify({ copiedFrom, missingSince, version: 1 } satisfies Manifest),
     { contentType: "application/json" },
   );
 

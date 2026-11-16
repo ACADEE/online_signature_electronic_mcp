@@ -408,3 +408,47 @@ test("copying files back skips the ones a stopped run already copied", async () 
   assert.deepEqual(result, { copied: 1, failures: [], skipped: 1 });
   assert.equal(app.objects.get("b.pdf")?.body.toString(), "bbb");
 });
+
+test("a file written again at the same size is copied again", async () => {
+  let now = new Date("2026-11-01T08:00:00Z");
+  const clock = () => now;
+  const source = memoryStore(clock);
+  const target = memoryStore(clock);
+
+  await source.put("a.pdf", Buffer.from("unsigned"), {
+    contentType: "application/pdf",
+  });
+  await runBackup({ database, keepDays: 30, now, source, target });
+
+  // Rewritten in place, the same number of bytes, and the backup's copy is
+  // newer than neither: only the recorded version tells them apart.
+  now = new Date("2026-11-01T09:00:00Z");
+  await source.put("a.pdf", Buffer.from("signed!!"), {
+    contentType: "application/pdf",
+  });
+  target.objects.get("files/a.pdf")!.uploadedAt = new Date(
+    "2026-11-01T10:00:00Z",
+  );
+
+  const second = await runBackup({
+    database,
+    keepDays: 30,
+    now,
+    source,
+    target,
+  });
+
+  assert.equal(second.filesCopied, 1);
+  assert.equal(target.objects.get("files/a.pdf")?.body.toString(), "signed!!");
+
+  const third = await runBackup({
+    database,
+    keepDays: 30,
+    now,
+    source,
+    target,
+  });
+
+  assert.equal(third.filesCopied, 0);
+  assert.equal(third.filesUnchanged, 1);
+});
