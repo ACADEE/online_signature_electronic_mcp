@@ -43,6 +43,12 @@ release says when it does.
   `docs/backup-and-restore.md`. `vercel.json` has a second daily cron job,
   which does nothing until the token is set.
 
+- Account closure requests and account deletions are recorded in the site
+  audit trail.
+- `docs/soc2`: a SOC 2 pack for organizations that put an install in their
+  audit: a control map to the Trust Services Criteria, vendor duties,
+  questionnaire answers and sample policies.
+
 ### Project security
 
 - CodeQL, dependency review, a weekly `npm audit` and OpenSSF Scorecard run

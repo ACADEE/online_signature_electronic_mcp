@@ -18,6 +18,8 @@ import { canonicalJson } from "../utils/canonical-json.ts";
 // changed, removed or reordered row shows.
 
 export const systemAuditEventTypes = [
+  "account_closure_requested",
+  "account_deleted",
   "settings_changed",
   "part11_mode_changed",
   "role_changed",

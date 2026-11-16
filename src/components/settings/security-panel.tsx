@@ -21,6 +21,8 @@ type AuditResponse = {
 } | null;
 
 const EVENT_LABELS: Record<SystemAuditEvent["event"], string> = {
+  account_closure_requested: "Account closure requested",
+  account_deleted: "Account deleted",
   email_domain_changed: "Email domain changed",
   identity_verification_revoked: "Identity confirmation taken back",
   identity_verified: "Identity confirmed",
