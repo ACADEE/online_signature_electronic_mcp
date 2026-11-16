@@ -1308,7 +1308,11 @@ test("two-step sign-in: an administrator sets it up and requires it of everyone"
   });
 
   await test.step("signing in now asks for the second step; a backup code works", async () => {
-    const context = await browser.newContext();
+    const context = await browser.newContext({
+      // Better Auth allows three sign-ins per address in ten seconds. Each
+      // browser here gets its own address so the steps do not race it.
+      extraHTTPHeaders: { "x-forwarded-for": "198.51.100.21" },
+    });
     const adminPage = await context.newPage();
 
     await adminPage.goto("/login");
@@ -1328,7 +1332,11 @@ test("two-step sign-in: an administrator sets it up and requires it of everyone"
   });
 
   await test.step("someone without it is asked to set it up before anything else", async () => {
-    const context = await browser.newContext();
+    const context = await browser.newContext({
+      // Better Auth allows three sign-ins per address in ten seconds. Each
+      // browser here gets its own address so the steps do not race it.
+      extraHTTPHeaders: { "x-forwarded-for": "198.51.100.22" },
+    });
     const memberPage = await context.newPage();
 
     await memberPage.goto("/login");
