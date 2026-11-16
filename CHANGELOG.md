@@ -37,6 +37,11 @@ release says when it does.
 - Audit rows (site and document trails) and security events are written to
   the function logs as JSON lines once saved, so a Vercel log drain can
   deliver them to a SIEM. `AUDIT_LOG=off` stops the audit lines.
+- A daily backup of the database and files to a second, private Blob store,
+  turned on with `BACKUP_BLOB_READ_WRITE_TOKEN`, and `npm run restore-backup`
+  to restore it into a new database and store. See
+  `docs/backup-and-restore.md`. `vercel.json` has a second daily cron job,
+  which does nothing until the token is set.
 
 This release changes the database (`20261117090000_sign_in_security.sql`,
 `20261117100000_session_controls.sql`), which the production build applies.
