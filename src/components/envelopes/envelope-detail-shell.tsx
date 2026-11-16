@@ -5,6 +5,7 @@ import {
   ClockIcon,
   DownloadIcon,
   MinusIcon,
+  PencilIcon,
   XIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -72,6 +73,7 @@ type ModalState =
   | "change-deadline"
   | "change-reminders"
   | "copy-draft"
+  | "correct-signer"
   | "delete-draft"
   | "save-template"
   | "void-envelope"
@@ -131,9 +133,12 @@ export function EnvelopeDetailShell({
   const [isChangingDeadline, setIsChangingDeadline] = useState(false);
   const [isChangingReminders, setIsChangingReminders] = useState(false);
   const [isCopyingDraft, setIsCopyingDraft] = useState(false);
+  const [isCorrectingSigner, setIsCorrectingSigner] = useState(false);
   const [isDeletingDraft, setIsDeletingDraft] = useState(false);
   const [isSendingReminder, setIsSendingReminder] = useState(false);
   const [isVoidingEnvelope, setIsVoidingEnvelope] = useState(false);
+  const [correctingSigner, setCorrectingSigner] =
+    useState<EnvelopeDetailSigner | null>(null);
   const [voidReason, setVoidReason] = useState("");
   const [savedTemplateName, setSavedTemplateName] = useState<string | null>(
     null,
@@ -284,6 +289,43 @@ export function EnvelopeDetailShell({
       setActionError("Unable to change the deadline.");
     } finally {
       setIsChangingDeadline(false);
+    }
+  }
+
+  async function handleConfirmCorrectSigner(next: {
+    email: string;
+    name: string;
+  }) {
+    if (!correctingSigner) {
+      return;
+    }
+
+    setActionError(null);
+    setIsCorrectingSigner(true);
+
+    try {
+      const response = await fetch(
+        `/api/envelopes/${encodeURIComponent(envelopeId)}/signers/${encodeURIComponent(correctingSigner.id)}`,
+        {
+          body: JSON.stringify(next),
+          headers: { "content-type": "application/json" },
+          method: "PATCH",
+        },
+      );
+      const payload = (await response.json().catch(() => null)) as {
+        error?: string;
+      } | null;
+
+      if (response.ok) {
+        window.location.reload();
+        return;
+      }
+
+      setActionError(payload?.error ?? "Unable to correct this signer.");
+    } catch {
+      setActionError("Unable to correct this signer.");
+    } finally {
+      setIsCorrectingSigner(false);
     }
   }
 
@@ -702,6 +744,27 @@ export function EnvelopeDetailShell({
                               {signer.statusDateLabel}
                             </p>
                           ) : null}
+                          {activeRecord.status === "sent" &&
+                          !record.part11 &&
+                          (signer.status === "waiting" ||
+                            signer.status === "pending") ? (
+                            <button
+                              className="btn-quiet inline-flex items-center gap-1.5"
+                              onClick={() => {
+                                setActionError(null);
+                                setCorrectingSigner(signer);
+                                setActiveModal("correct-signer");
+                              }}
+                              type="button"
+                            >
+                              <PencilIcon
+                                aria-hidden="true"
+                                className="size-3.5"
+                                strokeWidth={2.4}
+                              />
+                              Change
+                            </button>
+                          ) : null}
                         </div>
                       </div>
 
@@ -800,6 +863,20 @@ export function EnvelopeDetailShell({
           onCancel={() => setActiveModal(null)}
           onConfirm={handleConfirmCopyDraft}
           processing={isCopyingDraft}
+        />
+      ) : null}
+
+      {activeModal === "correct-signer" && correctingSigner ? (
+        <CorrectSignerDialog
+          email={correctingSigner.email}
+          errorMessage={actionError}
+          name={correctingSigner.name}
+          onCancel={() => {
+            setActiveModal(null);
+            setCorrectingSigner(null);
+          }}
+          onConfirm={handleConfirmCorrectSigner}
+          processing={isCorrectingSigner}
         />
       ) : null}
 
@@ -1117,6 +1194,103 @@ function RemindersDialog({
               onClick={() => onConfirm(intervalDays)}
             >
               {processing ? "Saving..." : "Save reminders"}
+            </ShellButton>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+type CorrectSignerDialogProps = {
+  email: string;
+  errorMessage?: string | null;
+  name: string;
+  onCancel: () => void;
+  onConfirm: (next: { email: string; name: string }) => void | Promise<void>;
+  processing?: boolean;
+};
+
+function CorrectSignerDialog({
+  email,
+  errorMessage,
+  name,
+  onCancel,
+  onConfirm,
+  processing = false,
+}: CorrectSignerDialogProps) {
+  const [nextName, setNextName] = useState(name);
+  const [nextEmail, setNextEmail] = useState(email);
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !processing) {
+          onCancel();
+        }
+      }}
+    >
+      <DialogContent className="max-w-md sm:p-8" showCloseButton={false}>
+        <div className="space-y-4">
+          <DialogHeader className="space-y-3">
+            <DialogTitle>Correct this signer</DialogTitle>
+            <DialogDescription asChild>
+              <div className="space-y-2 text-sm leading-6 text-(--secondary)">
+                <p>
+                  The signing link already sent to this person will stop
+                  working. If it is their turn, a new invitation goes to the
+                  corrected address.
+                </p>
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+
+          <label className="grid gap-1.5">
+            <span className="text-[0.8125rem] font-semibold text-(--secondary)">
+              Name
+            </span>
+            <input
+              autoFocus
+              className="field-input"
+              disabled={processing}
+              onChange={(event) => setNextName(event.target.value)}
+              value={nextName}
+            />
+          </label>
+
+          <label className="grid gap-1.5">
+            <span className="text-[0.8125rem] font-semibold text-(--secondary)">
+              Email
+            </span>
+            <input
+              className="field-input"
+              disabled={processing}
+              onChange={(event) => setNextEmail(event.target.value)}
+              type="email"
+              value={nextEmail}
+            />
+          </label>
+
+          {errorMessage ? (
+            <div className="notice notice-danger" role="alert">
+              <p>{errorMessage}</p>
+            </div>
+          ) : null}
+
+          <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row sm:justify-end">
+            <ShellButton
+              disabled={processing}
+              onClick={onCancel}
+              variant="secondary"
+            >
+              Cancel
+            </ShellButton>
+            <ShellButton
+              loading={processing}
+              onClick={() => onConfirm({ email: nextEmail, name: nextName })}
+            >
+              {processing ? "Saving..." : "Save"}
             </ShellButton>
           </div>
         </div>

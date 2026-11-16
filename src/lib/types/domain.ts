@@ -65,6 +65,7 @@ export const auditEventTypes = [
   "reminded_auto",
   "reauthentication_failed",
   "copied",
+  "signer_corrected",
 ] as const;
 
 /**
