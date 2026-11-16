@@ -1494,7 +1494,9 @@ test("a failed reminder does not bring back the link a correction replaced", asy
   assert.equal((await verifyAuditChain(envelopeId, database)).ok, true);
 });
 
-test("a decline whose certificate missed another signer's correction is refused", async () => {
+async function declineRacingAnotherCorrection(
+  isTheStatement: (text: string) => boolean,
+) {
   const { userId } = await createOwner();
   const envelopeId = await createEnvelope({ userId });
   const declining = await createSigner({ envelopeId });
@@ -1538,19 +1540,11 @@ test("a decline whose certificate missed another signer's correction is refused"
 
   Object.assign(process.env, settings);
 
-  // The correction lands after the decline has read the audit trail for
-  // its certificate, and before it takes the envelope lock.
-  const pool = afterStatement(
-    database,
-    (text) =>
-      text.includes("FROM audit_events") &&
-      text.includes("ORDER BY sequence ASC NULLS FIRST"),
-    async () => {
-      await correct(userId, envelopeId, waiting.signerId, {
-        email: "waiting.fixed@example.test",
-      });
-    },
-  );
+  const pool = afterStatement(database, isTheStatement, async () => {
+    await correct(userId, envelopeId, waiting.signerId, {
+      email: "waiting.fixed@example.test",
+    });
+  });
 
   try {
     await assert.rejects(
@@ -1590,6 +1584,24 @@ test("a decline whose certificate missed another signer's correction is refused"
 
     await rm(storageDir, { force: true, recursive: true });
   }
+}
+
+test("a decline whose certificate missed another signer's correction is refused", async () => {
+  // The correction lands after the decline has read the audit trail for
+  // its certificate, and before it takes the envelope lock.
+  await declineRacingAnotherCorrection(
+    (text) =>
+      text.includes("FROM audit_events") &&
+      text.includes("ORDER BY sequence ASC NULLS FIRST"),
+  );
+});
+
+test("a decline whose recipients were read before another signer's correction is refused", async () => {
+  // The correction lands after the decline has read the recipients, so the
+  // audit trail it reads afterwards already holds the correction.
+  await declineRacingAnotherCorrection((text) =>
+    text.includes('access_code_hash AS "accessCodeHash"'),
+  );
 });
 
 test("the corrected recipient's first view is recorded", async () => {

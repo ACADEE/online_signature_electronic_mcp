@@ -3080,11 +3080,10 @@ export async function declineSigningForToken(
     declinedAt,
     declineReason,
   );
-  const auditEventsBefore = await listAuditEventsForEnvelope(
-    context.envelope.id,
-    database,
-  );
-  const auditEvents = [...auditEventsBefore, declinedAuditEvent];
+  const auditEvents = [
+    ...(await listAuditEventsForEnvelope(context.envelope.id, database)),
+    declinedAuditEvent,
+  ];
   const storedCertificateKeys: string[] = [];
   let certificate: { key: string; sha256: string };
   let recipientCertificateSha256: string;
@@ -3140,21 +3139,31 @@ export async function declineSigningForToken(
         tokenHash: presentedTokenHash,
       });
 
-      // The certificates above were made before the envelope lock. If the
-      // sender corrected another recipient in that time, they name the old
-      // person and leave the correction out, so they must not be kept.
-      const correctedSince = await tx.query(
+      // The certificates above were made before the envelope lock, from the
+      // recipients read when the link was opened. If the sender corrected one
+      // of them since, they name the old person and leave the correction
+      // out, so they must not be kept. A correction cannot commit while this
+      // lock is held, so comparing here covers the whole window.
+      const recipientsNow = await tx.query<{
+        email: string;
+        id: string;
+        name: string;
+      }>(
         `
-          SELECT 1 FROM audit_events
-          WHERE envelope_id = $1
-            AND event = 'signer_corrected'
-            AND NOT (id = ANY($2::text[]))
-          LIMIT 1
+          SELECT id, name, email FROM signers
+          WHERE envelope_id = $1 AND id = ANY($2::text[])
         `,
-        [context.envelope.id, auditEventsBefore.map((event) => event.id)],
+        [context.envelope.id, context.signers.map((signer) => signer.id)],
       );
+      const recipientsChanged =
+        recipientsNow.rows.length !== context.signers.length ||
+        recipientsNow.rows.some((row) => {
+          const seen = context.signers.find((signer) => signer.id === row.id);
 
-      if ((correctedSince.rowCount ?? 0) > 0) {
+          return !seen || seen.name !== row.name || seen.email !== row.email;
+        });
+
+      if (recipientsChanged) {
         throw new SigningMutationError(
           "This envelope changed while you were declining. Open your signing link again.",
           409,
