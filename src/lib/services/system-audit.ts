@@ -1,11 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import {
+  afterCommit,
   type DbExecutor,
   getDb,
   queryMany,
   withTransaction,
 } from "../db/connection.ts";
+import { logAuditRecord } from "../security/logging.ts";
 import { canonicalJson } from "../utils/canonical-json.ts";
 
 // The install's own audit trail: changes that are not about one envelope,
@@ -119,6 +121,7 @@ async function insertChained(
     userAgent: input.userAgent ?? null,
   };
   const previousHash = previousRow?.rowHash ?? null;
+  const rowHash = computeSystemAuditRowHash(previousHash, fields);
 
   await database.query(
     `
@@ -139,9 +142,18 @@ async function insertChained(
       fields.metadata,
       fields.createdAt,
       previousHash,
-      computeSystemAuditRowHash(previousHash, fields),
+      rowHash,
     ],
   );
+
+  afterCommit(database, () => {
+    logAuditRecord({
+      ...fields,
+      actorType: "user",
+      rowHash,
+      trail: "site",
+    });
+  });
 
   return fields;
 }

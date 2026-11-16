@@ -34,6 +34,9 @@ release says when it does.
   `SSO_CLIENT_SECRET`. New people get an account under the install's
   sign-up rule. `PASSWORD_SIGN_IN=off` then turns password sign-in off,
   except for the addresses in `PASSWORD_SIGN_IN_ALLOWED_EMAILS`.
+- Audit rows (site and document trails) and security events are written to
+  the function logs as JSON lines once saved, so a Vercel log drain can
+  deliver them to a SIEM. `AUDIT_LOG=off` stops the audit lines.
 
 This release changes the database (`20261117090000_sign_in_security.sql`,
 `20261117100000_session_controls.sql`), which the production build applies.

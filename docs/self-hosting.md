@@ -141,6 +141,7 @@ A deployment made with the button needs no environment variables. These are ther
 | `SEAL_TIMESTAMP_URL`                                | An RFC 3161 timestamp server that adds a trusted time to each seal, and long-term validation. See [Long-term validation](#long-term-validation).                                                       |
 | `EIDEASY_CLIENT_ID`, `EIDEASY_SECRET`               | Let senders ask for advanced or qualified signatures in the signers' own names, through eID Easy. See [Signatures in the signers' own names](#signatures-in-the-signers-own-names-eidas-ades-and-qes). |
 | `CSC_API_URL`, `CSC_CLIENT_ID`, `CSC_CLIENT_SECRET` | The same through a trust service provider's remote signing service (CSC API v2). See [Signatures in the signers' own names](#signatures-in-the-signers-own-names-eidas-ades-and-qes).                  |
+| `AUDIT_LOG`                                         | `off` keeps audit rows out of the function logs. See [Send the audit trail to your SIEM](#send-the-audit-trail-to-your-siem).                                                                          |
 | `SSO_ISSUER`, `SSO_CLIENT_ID`, `SSO_CLIENT_SECRET`  | Sign in through your organization's identity provider (Okta, Entra ID, Google Workspace). `PASSWORD_SIGN_IN=off` then turns passwords off. See [Single sign-on](#single-sign-on).                      |
 
 ## Set the site up
@@ -165,6 +166,17 @@ These cover the people with an account (senders and administrators). Signers who
 - **Sessions.** A session lasts 7 days by default. Under Settings, Organization, Sign-in security an administrator can sign people out after 15 minutes to 8 hours without use, and at the latest 8 hours to 3 days after they signed in. A change applies to sessions that are already open, from their next click. Anyone can sign out on every device at once under Settings, Signed-in devices.
 - **Wrong passwords.** Ten wrong passwords for one email address within 15 minutes stop sign-in for that address until the 15 minutes are up. This happens whether or not the address has an account, so it says nothing about which ones do. Ten wrong codes at the second step lock that step for 15 minutes in the same way.
 - **The site audit trail** (Settings, Organization, Sign-in security) records each sign-in and failed sign-in with the address it came from, lockouts, sign-outs, password changes and resets, two-step sign-in being turned on, off or reset, new backup codes, and changes to settings, roles, the logo, the email domain, identity confirmations and signing locks. The rows form one hash chain, so a changed or removed row shows, and the trail downloads as CSV.
+
+### Send the audit trail to your SIEM
+
+Every row added to the site audit trail or to a document's audit trail is also written to the function logs, once it is saved, as one line of JSON. So are refused requests and failures worth a look. A Vercel log drain (team Settings, Drains, or an observability integration from the Vercel Marketplace such as Datadog, Axiom or Better Stack) then delivers them to your SIEM as fields it can search and alert on. Log drains are a paid Vercel feature; see Vercel's pricing page for which plans have them.
+
+Each line has `"source": "signudoc"` and a `type`:
+
+- `"audit"`: a copy of an audit row. `trail` is `site` or `envelope`, and the line carries `event`, `actorEmail`, `actorUserId`, `ipAddress`, `userAgent`, `metadata`, `envelopeId` (for a document), `occurredAt`, and the row's `sequence` and `rowHash`. The database stays the record: the hash matches a line to its row, and a gap in `sequence` shows a line that did not arrive. A change that fails and is rolled back writes no line.
+- `"security"`: a `category` and `message`, with the request's path (signing and download links are redacted), IP address and user, where known.
+
+`AUDIT_LOG=off` stops the audit lines, if you would rather not have email and IP addresses in your function logs. The trails in the database are the same either way.
 
 ### Single sign-on
 
