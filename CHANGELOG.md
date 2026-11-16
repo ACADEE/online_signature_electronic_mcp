@@ -6,6 +6,18 @@ All notable changes to SignuDoc are recorded here. The format follows
 change settings or the database in ways that need a migration step; each
 release says when it does.
 
+## [Unreleased]
+
+### Deploying
+
+- The Deploy button adds Resend first, then Neon and Blob, so Resend's
+  sending domain has longer to be ready before the first deployment starts.
+- The README and the self-hosting guide say what to do when Vercel stops the
+  first deployment with "One or more integration resources failed to
+  provision": wait, refresh and redeploy.
+- New [guide for AI agents](docs/deploy-with-an-agent.md) that deploy
+  SignuDoc for someone through their browser, linked from the README.
+
 ## [0.2.0] - 2026-11-15
 
 Installs can now find and take new releases without using git. No database
