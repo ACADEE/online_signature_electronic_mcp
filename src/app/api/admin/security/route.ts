@@ -48,11 +48,15 @@ export async function PUT(request: Request) {
     return rateLimitResponse;
   }
 
-  const body = (await request.json().catch(() => null)) as {
-    requireTwoFactor?: unknown;
-    sessionIdleMinutes?: unknown;
-    sessionMaxHours?: unknown;
-  } | null;
+  const parsed: unknown = await request.json().catch(() => null);
+  const body =
+    typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as {
+          requireTwoFactor?: unknown;
+          sessionIdleMinutes?: unknown;
+          sessionMaxHours?: unknown;
+        })
+      : null;
   const changesRequirement = typeof body?.requireTwoFactor === "boolean";
   const changesSessions =
     body !== null &&

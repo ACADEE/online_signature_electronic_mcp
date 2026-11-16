@@ -553,3 +553,107 @@ test("session limits end idle and old sessions, and record use", async () => {
   assert.equal(gone.rowCount, 0);
   assert.equal(await enforceSessionLimits(token, limits, { database }), false);
 });
+
+test("an ended session cannot use the auth server's account actions, even with its cookie cache", async () => {
+  const userId = await createVerifiedUser("pat@acme.com");
+  const session = await signIn("pat@acme.com");
+
+  // Signed out everywhere from another device: the row is gone, but the
+  // signed cookie cache still vouches for the session for a few minutes.
+  await database.query(`delete from session where "userId" = $1`, [userId]);
+
+  const changed = await call(
+    "/change-password",
+    { currentPassword: PASSWORD, newPassword: `${PASSWORD} again` },
+    session.cookies,
+  );
+
+  assert.equal(changed.status, 401, JSON.stringify(changed.payload));
+  assert.equal(changed.payload?.code, "SESSION_ENDED");
+  assert.equal((await events("password_changed")).length, 0);
+
+  // Past the install's idle limit, the same.
+  const later = await signIn("pat@acme.com");
+
+  await saveSettings({ sessionIdleMinutes: 15 }, database);
+  invalidateSettingsCache();
+  await database.query(
+    `update session set last_active_at = extract(epoch from now())::int - 3600 where "userId" = $1`,
+    [userId],
+  );
+
+  const enabled = await call(
+    "/two-factor/enable",
+    { password: PASSWORD },
+    later.cookies,
+  );
+
+  assert.equal(enabled.status, 401, JSON.stringify(enabled.payload));
+
+  // Signing in again is never in the way.
+  assert.equal((await signIn("pat@acme.com")).status, 200);
+});
+
+test("a device is never trusted to skip the second step", async () => {
+  await createVerifiedUser("pat@acme.com");
+
+  const { totpURI } = await enableTwoFactor("pat@acme.com");
+  const first = await signIn("pat@acme.com");
+  const trusted = await call(
+    "/two-factor/verify-totp",
+    { code: totp(totpURI), trustDevice: true },
+    first.cookies,
+  );
+
+  assert.equal(trusted.status, 400);
+  assert.equal(trusted.payload?.code, "TRUST_DEVICE_NOT_ALLOWED");
+  assert.equal(
+    [...first.cookies.keys()].some((name) => name.includes("trust_device")),
+    false,
+  );
+});
+
+test("confirming an authenticator with a leftover challenge cookie is recorded as set-up, not a sign-in", async () => {
+  const userId = await createVerifiedUser("pat@acme.com");
+
+  // A challenge cookie left over from a sign-in that was never finished,
+  // before an administrator reset this person's two-step sign-in.
+  await enableTwoFactor("pat@acme.com");
+
+  const abandoned = await signIn("pat@acme.com");
+
+  assert.equal(abandoned.payload?.twoFactorRedirect, true);
+  await database.query(
+    `update "user" set "twoFactorEnabled" = false where id = $1`,
+    [userId],
+  );
+  await database.query(`delete from "twoFactor" where "userId" = $1`, [userId]);
+  await database.query("delete from public.system_audit_events");
+
+  const session = await signIn("pat@acme.com");
+
+  for (const [name, value] of abandoned.cookies) {
+    if (name.includes("two_factor")) {
+      session.cookies.set(name, value);
+    }
+  }
+
+  const enabled = await call(
+    "/two-factor/enable",
+    { password: PASSWORD },
+    session.cookies,
+  );
+
+  assert.equal(enabled.status, 200, JSON.stringify(enabled.payload));
+
+  const before = (await events("sign_in_succeeded")).length;
+  const verified = await call(
+    "/two-factor/verify-totp",
+    { code: totp(String(enabled.payload?.totpURI)) },
+    session.cookies,
+  );
+
+  assert.equal(verified.status, 200, JSON.stringify(verified.payload));
+  assert.equal((await events("two_factor_enabled"))[0]?.actorUserId, userId);
+  assert.equal((await events("sign_in_succeeded")).length, before);
+});

@@ -313,12 +313,15 @@ beforeEach(async () => {
 });
 
 after(async () => {
-  await database.query(`truncate public."user" cascade`);
-  await database.query("delete from public.system_audit_events");
-  await database.query("delete from public.app_settings");
-  replaceDbPoolForTests(replaced ?? database);
-  await database.end();
-  provider.close();
+  try {
+    await database.query(`truncate public."user" cascade`);
+    await database.query("delete from public.system_audit_events");
+    await database.query("delete from public.app_settings");
+    replaceDbPoolForTests(replaced ?? database);
+    await database.end();
+  } finally {
+    provider?.close();
+  }
 });
 
 test("a first sign-in through the identity provider makes a verified account and is audited", async () => {
@@ -540,4 +543,30 @@ test("requiring two-step sign-in does not hold up someone who only uses single s
     await needsTwoFactorSetup({ requireTwoFactor: true }, user, { database }),
     true,
   );
+});
+
+test("an ID token posted straight to the sign-in route is refused, not signed in unaudited", async () => {
+  const auth = await makeAuth();
+  const token = await signIdToken(
+    {
+      email: "pat@acme.com",
+      email_verified: true,
+      name: "Pat Person",
+      sub: "okta-pat",
+    },
+    null,
+  );
+  const result = await post(auth, "/sign-in/social", {
+    idToken: { token },
+    provider: "sso",
+  });
+
+  assert.equal(result.status, 400);
+  assert.equal(result.payload?.code, "ID_TOKEN_SIGN_IN_NOT_ALLOWED");
+
+  const accounts = await database.query(
+    `select 1 from "user" where email = 'pat@acme.com'`,
+  );
+
+  assert.equal(accounts.rowCount, 0);
 });

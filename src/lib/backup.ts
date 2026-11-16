@@ -1,4 +1,5 @@
 import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { createGunzip, createGzip } from "node:zlib";
 
 import { del, get, list, put } from "@vercel/blob";
@@ -313,21 +314,20 @@ type Manifest = {
   version: 1;
 };
 
+// Only a manifest that is not there yet starts empty. One that cannot be
+// read stops the run: starting over would restart the clock on every
+// deleted file, and keep them past BACKUP_KEEP_DAYS.
 async function readManifest(store: BackupStore): Promise<Manifest> {
-  const found = await store.get(MANIFEST_PATH).catch(() => null);
+  const found = await store.get(MANIFEST_PATH);
 
   if (!found) {
     return { missingSince: {}, version: 1 };
   }
 
-  try {
-    const text = await new Response(found.stream).text();
-    const parsed = JSON.parse(text) as Partial<Manifest>;
+  const text = await new Response(found.stream).text();
+  const parsed = JSON.parse(text) as Partial<Manifest>;
 
-    return { missingSince: parsed.missingSince ?? {}, version: 1 };
-  } catch {
-    return { missingSince: {}, version: 1 };
-  }
+  return { missingSince: parsed.missingSince ?? {}, version: 1 };
 }
 
 export type BackupSummary = {
@@ -360,11 +360,14 @@ export async function runBackup({
   // 1. The database.
   const databaseBackup = databaseBackupPath(now);
 
-  await target.put(
-    databaseBackup,
-    Readable.from(exportDatabaseLines(database, now)).pipe(createGzip()),
-    { contentType: "application/gzip" },
-  );
+  // pipeline() passes a failed export on to the upload, so it ends with
+  // that error rather than waiting for data that will not come.
+  const compressed = createGzip();
+
+  await Promise.all([
+    pipeline(Readable.from(exportDatabaseLines(database, now)), compressed),
+    target.put(databaseBackup, compressed, { contentType: "application/gzip" }),
+  ]);
 
   const cutoff = now.getTime() - keepDays * DAY_MS;
   const databaseCopies = (await listAll(target, DATABASE_PREFIX)).sort((a, b) =>
@@ -479,14 +482,22 @@ export async function* readDatabaseBackup(
     }
   | { kind: "row"; row: unknown; table: string }
 > {
-  const lines = Readable.fromWeb(
-    stream as import("node:stream/web").ReadableStream,
-  ).pipe(createGunzip());
+  const lines = createGunzip();
+
+  // A read error ends the loop below with that error.
+  pipeline(
+    Readable.fromWeb(stream as import("node:stream/web").ReadableStream),
+    lines,
+  ).catch(() => {});
+  // Decoded as one stream, so a character split between two chunks stays
+  // whole.
+  lines.setEncoding("utf8");
+
   let buffered = "";
   let first = true;
 
   for await (const chunk of lines) {
-    buffered += (chunk as Buffer).toString("utf8");
+    buffered += chunk as string;
 
     let newline = buffered.indexOf("\n");
 
@@ -654,12 +665,23 @@ export async function restoreFiles({
 }: {
   source: BackupStore;
   target: BackupStore;
-}): Promise<{ copied: number; failures: string[] }> {
+}): Promise<{ copied: number; failures: string[]; skipped: number }> {
   const copies = await listAll(source, FILES_PREFIX);
+  // A file already there at the same size was copied by an earlier run that
+  // stopped part way, so running it again carries on from there.
+  const present = new Map(
+    (await listAll(target)).map((blob) => [blob.pathname, blob.size]),
+  );
   const failures: string[] = [];
   let copied = 0;
+  let skipped = 0;
 
   for (const copy of copies) {
+    if (present.get(copy.pathname.slice(FILES_PREFIX.length)) === copy.size) {
+      skipped += 1;
+      continue;
+    }
+
     try {
       const found = await source.get(copy.pathname);
 
@@ -677,5 +699,5 @@ export async function restoreFiles({
     }
   }
 
-  return { copied, failures };
+  return { copied, failures, skipped };
 }

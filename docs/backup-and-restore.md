@@ -50,7 +50,7 @@ You need a computer with Node.js 24 and a copy of this repository at the same ve
    npm run restore-backup                            # restore the newest one
    ```
 
-   `--backup database/<name>` restores an older one instead. The script applies the migrations, loads the database in one transaction (so a failed restore leaves nothing half done), then copies the files back to their own paths. It refuses a database that already has accounts in it, and a backup made by a newer SignuDoc than the copy you are running.
+   `--backup database/<name>` restores an older one instead. The script applies the migrations, loads the database in one transaction (so a failed restore leaves nothing half done), then copies the files back to their own paths. It refuses a database that already has accounts in it, and a backup made by a newer SignuDoc than the copy you are running. If copying the files stops part way (a network error, or you stopped it), run `npm run restore-backup -- --files-only` to finish: it skips the database and every file that is already there.
 
 4. Connect the new database and Blob store to the install's Vercel project (or a new one) in place of the old ones, keep `BETTER_AUTH_SECRET` the same as before, and deploy. Two-step sign-in keys are encrypted with that secret, and session cookies are signed with it; if it changes, everyone signs in again and sets up two-step sign-in again.
 5. Sign in, open a finished document, and check its audit trail and download.

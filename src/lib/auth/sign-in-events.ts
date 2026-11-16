@@ -8,7 +8,8 @@ import {
 
 import { getDb, queryOne } from "../db/connection.ts";
 import { logSecurityEvent } from "../security/logging.ts";
-import { getSettings } from "../settings.ts";
+import { enforceSessionLimits } from "../session-controls.ts";
+import { getSettings, isMissingSchemaError } from "../settings.ts";
 import {
   getClientIpAddress,
   getRequestUserAgent,
@@ -58,6 +59,25 @@ const SESSION_FIRST_EVENTS: Record<string, SystemAuditEventType> = {
   "/two-factor/disable": "two_factor_disabled",
   "/two-factor/generate-backup-codes": "two_factor_backup_codes_regenerated",
 };
+
+// Paths that do not act on the caller's session, so a stale one does not
+// stand in their way: signing in again, or reading the session (the app's
+// own session check in auth/server.ts applies the limits to that).
+function skipsSessionLimits(path: string): boolean {
+  return (
+    path === "/get-session" ||
+    path === "/sign-out" ||
+    path === "/ok" ||
+    path === "/error" ||
+    path === "/request-password-reset" ||
+    path === "/verify-email" ||
+    path.startsWith("/reset-password") ||
+    path.startsWith("/sign-in/") ||
+    path.startsWith("/sign-up/") ||
+    path.startsWith("/callback/") ||
+    path.startsWith("/oauth2/callback/")
+  );
+}
 
 type Actor = { email: string; userId: string };
 
@@ -158,11 +178,95 @@ async function record(
 
 export function signInEvents() {
   const sessionActors = new WeakMap<Request, Actor>();
+  // Whether a second-step check came with a signed-in session (someone
+  // confirming the authenticator they are setting up) or not (the second
+  // step of a sign-in). A leftover challenge cookie does not decide it.
+  const secondStepWithSession = new WeakMap<Request, boolean>();
 
   return {
     id: "signudoc-sign-in-events",
     hooks: {
       before: [
+        {
+          // The install's session limits (session-controls.ts) apply to the
+          // auth server's own account actions too: changing a password or
+          // email, managing two-step sign-in, listing sessions. Without
+          // this, the signed cookie cache would let an ended or expired
+          // session use them for a few more minutes.
+          matcher: (ctx) => !skipsSessionLimits(ctx.path ?? ""),
+          handler: createAuthMiddleware(async (ctx) => {
+            const session = await getSessionFromCtx(ctx).catch(() => null);
+
+            if (!session) {
+              return;
+            }
+
+            let allowed = true;
+
+            try {
+              allowed = await enforceSessionLimits(
+                session.session.token,
+                await getSettings(),
+              );
+            } catch (error) {
+              if (!isMissingSchemaError(error)) {
+                throw error;
+              }
+            }
+
+            if (!allowed) {
+              throw new APIError("UNAUTHORIZED", {
+                code: "SESSION_ENDED",
+                message: "Your session has ended. Sign in again.",
+              });
+            }
+          }),
+        },
+        {
+          // Single sign-on goes through the provider's sign-in page and back
+          // to /callback/sso, where it is recorded. Better Auth would also
+          // take an ID token posted straight to /sign-in/social; the app
+          // never does that, so it is refused rather than left unaudited.
+          matcher: (ctx) => ctx.path === "/sign-in/social",
+          handler: createAuthMiddleware(async (ctx) => {
+            if (
+              typeof ctx.body === "object" &&
+              ctx.body !== null &&
+              "idToken" in ctx.body &&
+              ctx.body.idToken
+            ) {
+              throw new APIError("BAD_REQUEST", {
+                code: "ID_TOKEN_SIGN_IN_NOT_ALLOWED",
+                message: "Sign in through your organization's sign-in page.",
+              });
+            }
+          }),
+        },
+        {
+          // A device that skips the second step would make "two-step
+          // sign-in required" untrue, so devices are never trusted.
+          matcher: (ctx) => SECOND_STEP_PATHS.has(ctx.path ?? ""),
+          handler: createAuthMiddleware(async (ctx) => {
+            if (
+              typeof ctx.body === "object" &&
+              ctx.body !== null &&
+              "trustDevice" in ctx.body &&
+              ctx.body.trustDevice
+            ) {
+              throw new APIError("BAD_REQUEST", {
+                code: "TRUST_DEVICE_NOT_ALLOWED",
+                message:
+                  "This install asks for the second step at every sign-in.",
+              });
+            }
+
+            if (ctx.request) {
+              const session = await getSessionFromCtx(ctx).catch(() => null);
+
+              secondStepWithSession.set(ctx.request, session !== null);
+            }
+          }),
+        },
         {
           matcher: (ctx) => ctx.path === "/sign-in/email",
           handler: createAuthMiddleware(async (ctx) => {
@@ -239,7 +343,14 @@ export function signInEvents() {
             }
 
             if (SECOND_STEP_PATHS.has(path)) {
-              await afterSecondStep(ctx, returned, failed);
+              await afterSecondStep(
+                ctx,
+                returned,
+                failed,
+                ctx.request
+                  ? secondStepWithSession.get(ctx.request)
+                  : undefined,
+              );
               return;
             }
 
@@ -420,6 +531,7 @@ async function afterSecondStep(
   ctx: HookContext,
   returned: unknown,
   failed: boolean,
+  withSession: boolean | undefined,
 ) {
   const challengeCookie = await ctx
     .getSignedCookie(
@@ -433,7 +545,9 @@ async function afterSecondStep(
       : "authenticator";
 
   // A signed-in person confirming the authenticator they are setting up.
-  if (!challengeCookie) {
+  // Better Auth treats any check made with a session that way, whatever
+  // challenge cookie is left over from an earlier sign-in.
+  if (withSession ?? !challengeCookie) {
     const user = readUser(returned);
 
     if (

@@ -316,3 +316,95 @@ test("copying stops at the deadline and the next run carries on", async () => {
 
   assert.equal(resumed.filesCopied, 3);
 });
+
+test("text outside ASCII comes back whole, even where it spans two chunks", async () => {
+  // Long enough that the decompressed backup reaches the reader in several
+  // chunks, with two-byte and four-byte characters across their edges.
+  const name = "Zoë Ångström 名前 🖋️ ".repeat(6000);
+  const id = randomUUID();
+
+  await database.query(
+    `insert into "user" (id, name, email, "emailVerified", role) values ($1, $2, 'zoe@acme.com', true, 'admin')`,
+    [id, name],
+  );
+
+  const target = memoryStore();
+  const summary = await runBackup({
+    database,
+    keepDays: 30,
+    source: memoryStore(),
+    target,
+  });
+
+  await clearTables();
+  await restoreDatabase({
+    backupPath: summary.databaseBackup,
+    database,
+    store: target,
+  });
+
+  const restored = await database.query<{ name: string }>(
+    `select name from "user" where id = $1`,
+    [id],
+  );
+
+  assert.equal(restored.rows[0]?.name, name);
+});
+
+test("a database that cannot be read fails the backup instead of hanging it", async () => {
+  const broken = {
+    connect: () => Promise.reject(new Error("connection refused")),
+  } as unknown as pg.Pool;
+
+  await assert.rejects(
+    runBackup({
+      database: broken,
+      keepDays: 30,
+      source: memoryStore(),
+      target: memoryStore(),
+    }),
+    /connection refused/,
+  );
+});
+
+test("a manifest that cannot be read stops the run rather than starting over", async () => {
+  const target = memoryStore();
+
+  await target.put("manifest.json", "{ not json", {
+    contentType: "application/json",
+  });
+
+  await assert.rejects(
+    runBackup({
+      database,
+      keepDays: 30,
+      source: memoryStore(),
+      target,
+    }),
+    SyntaxError,
+  );
+  assert.equal(
+    target.objects.get("manifest.json")?.body.toString(),
+    "{ not json",
+  );
+});
+
+test("copying files back skips the ones a stopped run already copied", async () => {
+  const backup = memoryStore();
+  const app = memoryStore();
+
+  await backup.put("files/a.pdf", Buffer.from("aaa"), {
+    contentType: "application/pdf",
+  });
+  await backup.put("files/b.pdf", Buffer.from("bbb"), {
+    contentType: "application/pdf",
+  });
+  await app.put("a.pdf", Buffer.from("aaa"), {
+    contentType: "application/pdf",
+  });
+
+  const result = await restoreFiles({ source: backup, target: app });
+
+  assert.deepEqual(result, { copied: 1, failures: [], skipped: 1 });
+  assert.equal(app.objects.get("b.pdf")?.body.toString(), "bbb");
+});
