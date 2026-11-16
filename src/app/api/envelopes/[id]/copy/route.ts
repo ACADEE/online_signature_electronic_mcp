@@ -35,9 +35,12 @@ export async function POST(
   const session = sessionResult;
   const { id } = await context.params;
   const ipAddress = getClientIpAddress(request.headers);
+  // The same allowance as uploading a document or using a template: each
+  // makes a draft and stores a copy of the PDF, so a per-envelope limit
+  // would let one account fill storage by copying many envelopes.
   const rateLimitResponse = await applyRateLimit({
-    category: "envelope_copy",
-    key: buildRateLimitKey(["envelope-copy", session.user.id, id]),
+    category: "draft_envelope_create",
+    key: buildRateLimitKey(["draft-create", session.user.id]),
     limit: 20,
     request,
     userId: session.user.id,
