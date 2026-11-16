@@ -218,6 +218,7 @@ export function signInEvents() {
       after: [
         {
           matcher: (ctx) =>
+            isProviderCallback(ctx.path) ||
             ctx.path === "/sign-in/email" ||
             ctx.path === "/change-password" ||
             SECOND_STEP_PATHS.has(ctx.path ?? "") ||
@@ -229,6 +230,11 @@ export function signInEvents() {
 
             if (path === "/sign-in/email") {
               await afterPasswordSignIn(ctx, returned, failed);
+              return;
+            }
+
+            if (isProviderCallback(path)) {
+              await afterProviderSignIn(ctx, returned);
               return;
             }
 
@@ -344,6 +350,60 @@ async function afterPasswordSignIn(
       targetUserId: user.id,
     });
   }
+}
+
+/** The identity provider sending someone back (auth/sso.ts). */
+function isProviderCallback(path: string | undefined): boolean {
+  return path === "/callback/:id" || (path?.startsWith("/callback/") ?? false);
+}
+
+/**
+ * The callback ends in a redirect either way: on to the app with a new
+ * session, or back to the sign-in page with ?error= saying why not.
+ */
+async function afterProviderSignIn(ctx: HookContext, returned: unknown) {
+  const session = ctx.context.newSession;
+  const provider =
+    typeof ctx.params?.id === "string" ? ctx.params.id : "unknown";
+
+  if (session) {
+    await record(ctx, {
+      actorEmail: session.user.email,
+      actorUserId: session.user.id,
+      event: "sign_in_succeeded",
+      metadata: { method: "sso", provider },
+      targetUserId: session.user.id,
+    });
+    return;
+  }
+
+  const location =
+    isAPIError(returned) && returned.headers instanceof Headers
+      ? returned.headers.get("location")
+      : null;
+  let reason: string | null = null;
+
+  try {
+    reason = location
+      ? new URL(location, "http://local").searchParams.get("error")
+      : null;
+  } catch {
+    reason = null;
+  }
+
+  // A redirect with no error is the hand-over to the provider, or a POST
+  // turned into a GET: nothing happened yet.
+  if (!reason) {
+    return;
+  }
+
+  await record(ctx, {
+    actorEmail: null,
+    actorUserId: null,
+    event: "sign_in_failed",
+    metadata: { method: "sso", provider, reason },
+    targetUserId: null,
+  });
 }
 
 function hasSessionToken(returned: unknown): boolean {

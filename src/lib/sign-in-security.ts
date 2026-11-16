@@ -106,12 +106,33 @@ export async function clearFailedSignIns(
  * Whether this person must set up two-step sign-in before using the app.
  * `twoFactorEnabled` comes from the session, which is at most a few minutes
  * old; the setup itself replaces the session, so it is current right after.
+ *
+ * It applies to password sign-in. Someone with no password, who only signs
+ * in through the organization's identity provider (auth/sso.ts), has the
+ * provider's own MFA as their second step, and could not set one up here.
  */
-export function needsTwoFactorSetup(
+export async function needsTwoFactorSetup(
   settings: { requireTwoFactor: boolean },
   user: object,
-): boolean {
-  return settings.requireTwoFactor && !usesTwoFactor(user);
+  options: { database?: DbExecutor } = {},
+): Promise<boolean> {
+  if (!settings.requireTwoFactor || usesTwoFactor(user)) {
+    return false;
+  }
+
+  const userId = "id" in user && typeof user.id === "string" ? user.id : null;
+
+  if (!userId) {
+    return true;
+  }
+
+  const password = await queryOne<{ found: number }>(
+    options.database ?? getDb(),
+    `SELECT 1 AS found FROM account WHERE "userId" = $1 AND "providerId" = 'credential' LIMIT 1`,
+    [userId],
+  );
+
+  return password !== null;
 }
 
 /**
@@ -172,7 +193,15 @@ export async function setTwoFactorRequirement(
       return;
     }
 
-    if (required && !actorRow.twoFactorEnabled) {
+    if (
+      required &&
+      !actorRow.twoFactorEnabled &&
+      (await needsTwoFactorSetup(
+        { requireTwoFactor: true },
+        { id: actor.userId },
+        { database: tx },
+      ))
+    ) {
       throw new SignInSecurityError(
         "Set up two-step sign-in for your own account first, under Settings, Two-step sign-in.",
         409,

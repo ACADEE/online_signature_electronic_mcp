@@ -34,7 +34,7 @@ export default async function AuthenticatedAppLayout({
 
   // The install requires two-step sign-in and this person has not set it
   // up: nothing else until they have.
-  if (needsTwoFactorSetup(settings, session.user)) {
+  if (await needsTwoFactorSetup(settings, session.user)) {
     redirect("/two-step-setup");
   }
 

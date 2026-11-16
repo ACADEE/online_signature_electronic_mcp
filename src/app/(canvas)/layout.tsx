@@ -23,7 +23,7 @@ export default async function CanvasLayout({
     redirect("/login");
   }
 
-  if (needsTwoFactorSetup(await getSettings(), session.user)) {
+  if (await needsTwoFactorSetup(await getSettings(), session.user)) {
     redirect("/two-step-setup");
   }
 

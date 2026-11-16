@@ -14,7 +14,7 @@ export async function requireVerifiedSenderSession(request: Request) {
   }
 
   if (session.user.emailVerified === true) {
-    if (needsTwoFactorSetup(await getSettings(), session.user)) {
+    if (await needsTwoFactorSetup(await getSettings(), session.user)) {
       return NextResponse.json(
         { error: "Set up two-step sign-in before continuing." },
         { status: 403 },

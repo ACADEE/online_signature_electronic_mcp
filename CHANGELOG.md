@@ -29,6 +29,11 @@ release says when it does.
   changes and the email domain being added. It moved from the Part 11 panel
   to the new Sign-in security panel, and is there whether or not Part 11
   mode is on.
+- Single sign-on over OpenID Connect (Okta, Microsoft Entra ID, Google
+  Workspace and others), set up with `SSO_ISSUER`, `SSO_CLIENT_ID` and
+  `SSO_CLIENT_SECRET`. New people get an account under the install's
+  sign-up rule. `PASSWORD_SIGN_IN=off` then turns password sign-in off,
+  except for the addresses in `PASSWORD_SIGN_IN_ALLOWED_EMAILS`.
 
 This release changes the database (`20261117090000_sign_in_security.sql`,
 `20261117100000_session_controls.sql`), which the production build applies.

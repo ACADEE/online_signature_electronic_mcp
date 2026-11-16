@@ -1,7 +1,7 @@
 import { APIError, betterAuth } from "better-auth";
 import { createAuthMiddleware } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
-import { haveIBeenPwned, twoFactor } from "better-auth/plugins";
+import { genericOAuth, haveIBeenPwned, twoFactor } from "better-auth/plugins";
 import { headers } from "next/headers";
 import { redirect, unstable_rethrow } from "next/navigation";
 import { after } from "next/server";
@@ -38,6 +38,12 @@ import {
 import { escapeHtml } from "../utils/html.ts";
 import { isRunningSetup } from "./setup-context.ts";
 import { signInEvents } from "./sign-in-events.ts";
+import {
+  mayUsePassword,
+  readPasswordSignInPolicy,
+  readSsoConfig,
+  SSO_PROVIDER_ID,
+} from "./sso.ts";
 import { recordSystemAuditEvent } from "../services/system-audit.ts";
 
 type CreateAppAuthOptions = {
@@ -251,6 +257,15 @@ function isPasswordBreachCheckEnabled(env: EnvSource): boolean {
   );
 }
 
+// Where a password is used or handed out. A reset link is only sent where
+// a password may be used, so turning password sign-in off cannot be undone
+// with "Forgot your password?".
+const PASSWORD_PATHS = new Set([
+  "/request-password-reset",
+  "/sign-in/email",
+  "/sign-up/email",
+]);
+
 export function createAppAuth({
   database = getDb(),
   env = process.env,
@@ -274,7 +289,40 @@ export function createAppAuth({
 
     return cachedEmailService;
   };
+  const sso = readSsoConfig(env);
+  const passwordPolicy = readPasswordSignInPolicy(env);
   const plugins = [
+    // Single sign-on with the organization's identity provider (sso.ts).
+    // Its sign-ins do not ask for this app's second step: the provider's
+    // own sign-in, with its own MFA, is the check.
+    ...(sso
+      ? [
+          genericOAuth({
+            config: [
+              {
+                clientId: sso.clientId,
+                clientSecret: sso.clientSecret,
+                discoveryUrl: sso.discoveryUrl,
+                // A provider whose discovery cannot vouch for its ID tokens
+                // is left out rather than trusted unchecked.
+                requireIdTokenVerification: true,
+                // Microsoft Entra ID leaves email_verified out of its
+                // tokens. The organization's own directory is trusted for
+                // its addresses unless it says one is not verified.
+                mapProfileToUser: (profile) => ({
+                  emailVerified:
+                    profile.email_verified !== false &&
+                    profile.email_verified !== "false",
+                }),
+                name: sso.name,
+                pkce: true,
+                providerId: SSO_PROVIDER_ID,
+                scopes: ["openid", "email", "profile"],
+              },
+            ],
+          }),
+        ]
+      : []),
     ...(isPasswordBreachCheckEnabled(env)
       ? [
           haveIBeenPwned({
@@ -399,7 +447,7 @@ export function createAppAuth({
       // address's domain and is printed on the sign-up page, so saying it
       // here gives nothing away.
       before: createAuthMiddleware(async (ctx) => {
-        if (ctx.path !== "/sign-up/email" || isRunningSetup()) {
+        if (isRunningSetup()) {
           return;
         }
 
@@ -411,6 +459,24 @@ export function createAppAuth({
           typeof body.email === "string"
             ? body.email
             : "";
+
+        // With password sign-in turned off, only the addresses kept for
+        // when the identity provider is down may use one (sso.ts).
+        if (
+          sso &&
+          PASSWORD_PATHS.has(ctx.path ?? "") &&
+          !mayUsePassword(passwordPolicy, email)
+        ) {
+          throw new APIError("FORBIDDEN", {
+            code: "PASSWORD_SIGN_IN_OFF",
+            message: `Password sign-in is turned off here. Continue with ${sso.name} instead.`,
+          });
+        }
+
+        if (ctx.path !== "/sign-up/email") {
+          return;
+        }
+
         const decision = await evaluateSignupRequest(email, env);
 
         if (!decision.allowed) {

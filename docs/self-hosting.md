@@ -141,6 +141,7 @@ A deployment made with the button needs no environment variables. These are ther
 | `SEAL_TIMESTAMP_URL`                                | An RFC 3161 timestamp server that adds a trusted time to each seal, and long-term validation. See [Long-term validation](#long-term-validation).                                                       |
 | `EIDEASY_CLIENT_ID`, `EIDEASY_SECRET`               | Let senders ask for advanced or qualified signatures in the signers' own names, through eID Easy. See [Signatures in the signers' own names](#signatures-in-the-signers-own-names-eidas-ades-and-qes). |
 | `CSC_API_URL`, `CSC_CLIENT_ID`, `CSC_CLIENT_SECRET` | The same through a trust service provider's remote signing service (CSC API v2). See [Signatures in the signers' own names](#signatures-in-the-signers-own-names-eidas-ades-and-qes).                  |
+| `SSO_ISSUER`, `SSO_CLIENT_ID`, `SSO_CLIENT_SECRET`  | Sign in through your organization's identity provider (Okta, Entra ID, Google Workspace). `PASSWORD_SIGN_IN=off` then turns passwords off. See [Single sign-on](#single-sign-on).                      |
 
 ## Set the site up
 
@@ -164,6 +165,28 @@ These cover the people with an account (senders and administrators). Signers who
 - **Sessions.** A session lasts 7 days by default. Under Settings, Organization, Sign-in security an administrator can sign people out after 15 minutes to 8 hours without use, and at the latest 8 hours to 3 days after they signed in. A change applies to sessions that are already open, from their next click. Anyone can sign out on every device at once under Settings, Signed-in devices.
 - **Wrong passwords.** Ten wrong passwords for one email address within 15 minutes stop sign-in for that address until the 15 minutes are up. This happens whether or not the address has an account, so it says nothing about which ones do. Ten wrong codes at the second step lock that step for 15 minutes in the same way.
 - **The site audit trail** (Settings, Organization, Sign-in security) records each sign-in and failed sign-in with the address it came from, lockouts, sign-outs, password changes and resets, two-step sign-in being turned on, off or reset, new backup codes, and changes to settings, roles, the logo, the email domain, identity confirmations and signing locks. The rows form one hash chain, so a changed or removed row shows, and the trail downloads as CSV.
+
+### Single sign-on
+
+People can sign in through your organization's identity provider instead of with a password, over OpenID Connect. That puts your provider's own rules in charge: its MFA, its conditional access, and removing someone there removes them here at their next sign-in. It works with any provider that publishes `/.well-known/openid-configuration`, which includes Okta, Microsoft Entra ID, Google Workspace, OneLogin, JumpCloud, Keycloak and Auth0. It is optional and set up by hand, because the provider is outside Vercel.
+
+1. In your provider, make a web application (OIDC, authorization code flow). Give it the redirect URI `https://<your site>/api/auth/callback/sso` and the scopes `openid email profile`.
+2. In the Vercel project, under Settings, Environment Variables, set:
+   - `SSO_ISSUER`: the provider's issuer URL. For Okta, `https://<your org>.okta.com` (or your custom authorization server's URL). For Entra ID, `https://login.microsoftonline.com/<tenant id>/v2.0`. For Google, `https://accounts.google.com`.
+   - `SSO_CLIENT_ID` and `SSO_CLIENT_SECRET`: from the application you made.
+   - `SSO_NAME` (optional): what the button says after "Continue with", such as `Okta`.
+3. Deploy again. The sign-in and sign-up pages show "Continue with …".
+
+How it behaves:
+
+- **New people** get an account the first time they sign in, under the same sign-up rule as a password sign-up (Settings, Organization, Who can sign up). So the email domain limit holds for single sign-on too. With Google this matters: any Google account can use the button, and the rule decides who gets an account. To let only your directory in, set the rule to your domains, or to nobody and add people some other way first.
+- **People who already have an account** with the same email address are signed in to it, if their address here is confirmed and the provider does not say theirs is unverified. Microsoft Entra ID does not say either way, and its addresses are trusted.
+- **Two-step sign-in** is not asked for after single sign-on: the provider's sign-in, with its own MFA, is the check. When an administrator requires two-step sign-in, it applies to people who have a password; someone who only uses single sign-on is not held up.
+- **Turning passwords off.** With single sign-on set up, `PASSWORD_SIGN_IN=off` stops password sign-in, password sign-up and password reset links. Put one or two administrator addresses in `PASSWORD_SIGN_IN_ALLOWED_EMAILS` (comma-separated) so there is a way in if the provider is down; their sign-in page shows "Sign in with a password instead". Without single sign-on set up, `PASSWORD_SIGN_IN=off` does nothing, so nobody is locked out by a half-finished setup.
+- **The site audit trail** records single sign-on sign-ins, and refused ones with the reason (for example, an address the sign-up rule turned away).
+- A missing or broken setting (one of the three left out, an issuer that is not `https://`) turns single sign-on off and leaves a warning in the function logs, so password sign-in keeps working.
+
+SAML is not supported. Okta, Entra ID and Google all offer OIDC for the same application.
 
 ## Your responsibilities
 

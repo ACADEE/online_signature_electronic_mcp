@@ -14,7 +14,7 @@ export default async function TwoStepSetupPage() {
     redirect("/login");
   }
 
-  if (!needsTwoFactorSetup(await getSettings(), session.user)) {
+  if (!(await needsTwoFactorSetup(await getSettings(), session.user))) {
     redirect("/dashboard");
   }
 
