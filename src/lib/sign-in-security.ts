@@ -262,3 +262,52 @@ export async function resetTwoFactor(
     );
   }, database);
 }
+
+/**
+ * Sets how long sessions may go unused and how long they may last. Applies
+ * to sessions that are already open too, from their next request.
+ */
+export async function setSessionLimits(
+  actor: Actor,
+  limits: {
+    sessionIdleMinutes: number | null;
+    sessionMaxHours: number | null;
+  },
+  database: DbPool = getDb(),
+): Promise<void> {
+  const { readStoredSettings, saveSettings } = await import("./settings.ts");
+
+  await withTransaction(async (tx) => {
+    await lockActor(actor, tx);
+    await tx.query(`SELECT id FROM app_settings WHERE id FOR UPDATE`);
+
+    const current = await readStoredSettings(tx);
+    const changes: Record<string, { from: number | null; to: number | null }> =
+      {};
+
+    for (const field of ["sessionIdleMinutes", "sessionMaxHours"] as const) {
+      const from = current?.[field] ?? null;
+
+      if (from !== limits[field]) {
+        changes[field] = { from, to: limits[field] };
+      }
+    }
+
+    if (Object.keys(changes).length === 0) {
+      return;
+    }
+
+    await saveSettings(limits, tx);
+    await recordSystemAuditEvent(
+      {
+        actorEmail: actor.email,
+        actorUserId: actor.userId,
+        event: "settings_changed",
+        ipAddress: actor.ipAddress ?? null,
+        metadata: { changes },
+        userAgent: actor.userAgent ?? null,
+      },
+      tx,
+    );
+  }, database);
+}

@@ -14,6 +14,7 @@ import {
   verifySystemAuditChain,
 } from "./services/system-audit.ts";
 import { invalidateSettingsCache, saveSettings } from "./settings.ts";
+import { enforceSessionLimits } from "./session-controls.ts";
 import {
   MAX_FAILED_SIGN_INS,
   resetTwoFactor,
@@ -481,4 +482,74 @@ test("signing out is recorded", async () => {
 
   assert.equal(result.status, 200);
   assert.equal((await events("signed_out"))[0]?.actorUserId, userId);
+});
+
+test("signing out everywhere ends every session and is recorded", async () => {
+  const userId = await createVerifiedUser("pat@acme.com");
+  const first = await signIn("pat@acme.com");
+
+  await signIn("pat@acme.com");
+
+  const result = await call("/revoke-sessions", {}, first.cookies);
+
+  assert.equal(result.status, 200, JSON.stringify(result.payload));
+  assert.equal((await events("sessions_revoked"))[0]?.actorUserId, userId);
+
+  const left = await database.query<{ total: number }>(
+    `select count(*)::int as total from session where "userId" = $1`,
+    [userId],
+  );
+
+  assert.equal(left.rows[0]?.total, 0);
+});
+
+test("session limits end idle and old sessions, and record use", async () => {
+  const userId = await createVerifiedUser("pat@acme.com");
+
+  await signIn("pat@acme.com");
+
+  const row = await database.query<{ createdAt: Date; token: string }>(
+    `select token, "createdAt" as "createdAt" from session where "userId" = $1`,
+    [userId],
+  );
+  const token = row.rows[0]?.token ?? "";
+  const created = Math.floor((row.rows[0]?.createdAt.getTime() ?? 0) / 1000);
+  const limits = { sessionIdleMinutes: 30, sessionMaxHours: 8 };
+
+  assert.equal(
+    await enforceSessionLimits(token, limits, {
+      database,
+      nowSeconds: created + 20 * 60,
+    }),
+    true,
+  );
+
+  const touched = await database.query<{ lastActiveAt: string }>(
+    `select last_active_at as "lastActiveAt" from session where token = $1`,
+    [token],
+  );
+
+  assert.equal(Number(touched.rows[0]?.lastActiveAt), created + 20 * 60);
+  // Counted from that use, not from sign-in.
+  assert.equal(
+    await enforceSessionLimits(token, limits, {
+      database,
+      nowSeconds: created + 45 * 60,
+    }),
+    true,
+  );
+  assert.equal(
+    await enforceSessionLimits(token, limits, {
+      database,
+      nowSeconds: created + 45 * 60 + 30 * 60,
+    }),
+    false,
+  );
+
+  const gone = await database.query(`select 1 from session where token = $1`, [
+    token,
+  ]);
+
+  assert.equal(gone.rowCount, 0);
+  assert.equal(await enforceSessionLimits(token, limits, { database }), false);
 });

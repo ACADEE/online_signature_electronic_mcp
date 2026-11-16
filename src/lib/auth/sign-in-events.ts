@@ -16,6 +16,7 @@ import {
 import {
   recordSystemAuditEvent,
   type RecordSystemAuditEventInput,
+  type SystemAuditEventType,
 } from "../services/system-audit.ts";
 import {
   clearFailedSignIns,
@@ -45,10 +46,18 @@ const SECOND_STEP_PATHS = new Set([
 // Paths whose actor is only known before the endpoint runs: each replaces
 // or ends the session it was called with.
 const SESSION_FIRST_PATHS = new Set([
+  "/revoke-sessions",
   "/sign-out",
   "/two-factor/disable",
   "/two-factor/generate-backup-codes",
 ]);
+
+const SESSION_FIRST_EVENTS: Record<string, SystemAuditEventType> = {
+  "/revoke-sessions": "sessions_revoked",
+  "/sign-out": "signed_out",
+  "/two-factor/disable": "two_factor_disabled",
+  "/two-factor/generate-backup-codes": "two_factor_backup_codes_regenerated",
+};
 
 type Actor = { email: string; userId: string };
 
@@ -258,12 +267,7 @@ export function signInEvents() {
             await record(ctx, {
               actorEmail: actor.email,
               actorUserId: actor.userId,
-              event:
-                path === "/sign-out"
-                  ? "signed_out"
-                  : path === "/two-factor/disable"
-                    ? "two_factor_disabled"
-                    : "two_factor_backup_codes_regenerated",
+              event: SESSION_FIRST_EVENTS[path] ?? "signed_out",
               targetUserId: actor.userId,
             });
           }),

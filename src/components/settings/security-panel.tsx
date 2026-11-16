@@ -3,6 +3,10 @@
 import { useEffect, useState } from "react";
 
 import type { SystemAuditEvent } from "@/lib/services/system-audit";
+import {
+  SESSION_IDLE_CHOICES,
+  SESSION_MAX_HOURS_CHOICES,
+} from "@/lib/session-choices";
 
 // Sign-in security and the install's own audit trail. Administrators only.
 
@@ -30,6 +34,7 @@ const EVENT_LABELS: Record<SystemAuditEvent["event"], string> = {
   sign_in_failed: "Sign-in failed",
   sign_in_locked: "Sign-in stopped after wrong passwords",
   sign_in_succeeded: "Signed in",
+  sessions_revoked: "Signed out everywhere",
   signed_out: "Signed out",
   signing_locked: "Signing locked",
   signing_unlocked: "Signing unlocked",
@@ -92,14 +97,40 @@ function describeEvent(event: SystemAuditEvent): string {
   }
 }
 
+function describeMinutes(minutes: number): string {
+  return minutes < 60
+    ? `${String(minutes)} minutes`
+    : minutes === 60
+      ? "1 hour"
+      : `${String(minutes / 60)} hours`;
+}
+
+function describeHours(hours: number): string {
+  return hours % 24 === 0
+    ? hours === 24
+      ? "1 day"
+      : `${String(hours / 24)} days`
+    : `${String(hours)} hours`;
+}
+
 export function SecurityPanel({
   initialRequireTwoFactor,
+  initialSessionIdleMinutes,
+  initialSessionMaxHours,
 }: {
   initialRequireTwoFactor: boolean;
+  initialSessionIdleMinutes: number | null;
+  initialSessionMaxHours: number | null;
 }) {
   const [requireTwoFactor, setRequireTwoFactor] = useState(
     initialRequireTwoFactor,
   );
+  const [savedLimits, setSavedLimits] = useState({
+    sessionIdleMinutes: initialSessionIdleMinutes,
+    sessionMaxHours: initialSessionMaxHours,
+  });
+  const [limits, setLimits] = useState(savedLimits);
+  const [limitsMessage, setLimitsMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [audit, setAudit] = useState<AuditResponse>(null);
@@ -160,6 +191,48 @@ export function SecurityPanel({
     }
   }
 
+  async function saveLimits() {
+    setIsSaving(true);
+    setError(null);
+    setLimitsMessage(null);
+
+    try {
+      const response = await fetch("/api/admin/security", {
+        body: JSON.stringify(limits),
+        headers: { "content-type": "application/json" },
+        method: "PUT",
+      });
+      const payload = (await response.json().catch(() => null)) as {
+        error?: string;
+        sessionIdleMinutes?: number | null;
+        sessionMaxHours?: number | null;
+      } | null;
+
+      if (!response.ok || payload?.sessionIdleMinutes === undefined) {
+        setError(payload?.error ?? GENERIC_ERROR_MESSAGE);
+        return;
+      }
+
+      const saved = {
+        sessionIdleMinutes: payload.sessionIdleMinutes,
+        sessionMaxHours: payload.sessionMaxHours ?? null,
+      };
+
+      setSavedLimits(saved);
+      setLimits(saved);
+      setLimitsMessage("Session limits saved.");
+      setAuditRevision((value) => value + 1);
+    } catch {
+      setError(GENERIC_ERROR_MESSAGE);
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  const limitsChanged =
+    limits.sessionIdleMinutes !== savedLimits.sessionIdleMinutes ||
+    limits.sessionMaxHours !== savedLimits.sessionMaxHours;
+
   return (
     <div className="space-y-5 border-t border-(--border) pt-8" id="security">
       <div className="space-y-2">
@@ -202,6 +275,88 @@ export function SecurityPanel({
               ? "Stop requiring two-step sign-in"
               : "Require two-step sign-in"}
         </button>
+      </div>
+
+      <div className="space-y-3">
+        <h4 className="text-[0.9375rem] font-bold text-(--fg)">Sessions</h4>
+        <p className="max-w-2xl text-sm leading-6 text-(--secondary)">
+          How long someone stays signed in. A change applies to everyone who is
+          signed in now, from their next click. Anyone can also sign out
+          everywhere from their own Settings.
+        </p>
+        <div className="grid max-w-xl gap-4 sm:grid-cols-2">
+          <label className="grid gap-1.5">
+            <span className="text-[0.8125rem] font-semibold text-(--secondary)">
+              Sign out after no use for
+            </span>
+            <select
+              className="field-input"
+              disabled={isSaving}
+              onChange={(event) => {
+                setLimitsMessage(null);
+                setLimits((current) => ({
+                  ...current,
+                  sessionIdleMinutes:
+                    event.target.value === ""
+                      ? null
+                      : Number(event.target.value),
+                }));
+              }}
+              value={limits.sessionIdleMinutes ?? ""}
+            >
+              <option value="">Never</option>
+              {SESSION_IDLE_CHOICES.map((minutes) => (
+                <option key={minutes} value={minutes}>
+                  {describeMinutes(minutes)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1.5">
+            <span className="text-[0.8125rem] font-semibold text-(--secondary)">
+              Sign out at the latest after
+            </span>
+            <select
+              className="field-input"
+              disabled={isSaving}
+              onChange={(event) => {
+                setLimitsMessage(null);
+                setLimits((current) => ({
+                  ...current,
+                  sessionMaxHours:
+                    event.target.value === ""
+                      ? null
+                      : Number(event.target.value),
+                }));
+              }}
+              value={limits.sessionMaxHours ?? ""}
+            >
+              <option value="">7 days (the default)</option>
+              {SESSION_MAX_HOURS_CHOICES.filter((hours) => hours !== 168).map(
+                (hours) => (
+                  <option key={hours} value={hours}>
+                    {describeHours(hours)}
+                  </option>
+                ),
+              )}
+            </select>
+          </label>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            className="btn-quiet"
+            disabled={isSaving || !limitsChanged}
+            onClick={() => void saveLimits()}
+            type="button"
+          >
+            {isSaving ? "Saving..." : "Save session limits"}
+          </button>
+          {limitsMessage ? (
+            <span className="text-sm text-(--secondary)" role="status">
+              {limitsMessage}
+            </span>
+          ) : null}
+        </div>
       </div>
 
       <div className="space-y-3">

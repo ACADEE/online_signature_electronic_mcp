@@ -1374,6 +1374,19 @@ test("two-step sign-in: an administrator sets it up and requires it of everyone"
     ).toBe(true);
   });
 
+  await test.step("session limits are saved and recorded", async () => {
+    await page
+      .getByLabel("Sign out after no use for")
+      .selectOption({ label: "8 hours" });
+    await page.getByRole("button", { name: "Save session limits" }).click();
+    await expect(page.getByText("Session limits saved.")).toBeVisible();
+    // Still signed in: the page's own session is well within the limit.
+    await page.reload();
+    await expect(page.getByLabel("Sign out after no use for")).toHaveValue(
+      "480",
+    );
+  });
+
   await test.step("the requirement can be lifted again", async () => {
     await page
       .getByRole("button", { name: "Stop requiring two-step sign-in" })

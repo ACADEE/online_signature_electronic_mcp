@@ -402,7 +402,11 @@ export function OrganizationSettings({
         {!values.hosted ? <PeoplePanel part11Mode={values.part11Mode} /> : null}
 
         {!values.hosted ? (
-          <SecurityPanel initialRequireTwoFactor={values.requireTwoFactor} />
+          <SecurityPanel
+            initialRequireTwoFactor={values.requireTwoFactor}
+            initialSessionIdleMinutes={values.sessionIdleMinutes}
+            initialSessionMaxHours={values.sessionMaxHours}
+          />
         ) : null}
 
         {!values.hosted ? (

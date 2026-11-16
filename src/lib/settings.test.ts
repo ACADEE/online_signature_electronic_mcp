@@ -16,6 +16,8 @@ const stored: AppSettings = {
   organizationName: "Acme Corp",
   part11Mode: false,
   requireTwoFactor: false,
+  sessionIdleMinutes: null,
+  sessionMaxHours: null,
   privacyUrl: "https://acme.com/privacy",
   retentionDays: null,
   senderAddress: "sign@acme.com",

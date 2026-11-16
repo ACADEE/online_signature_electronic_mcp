@@ -5,6 +5,7 @@ import { useState, type ChangeEvent, type FormEvent } from "react";
 import { useBranding } from "@/components/layout/branding-provider";
 import { FieldShell, ShellButton } from "@/components/shared/form-shell";
 import { PageHeader } from "@/components/shared/page-header";
+import { SessionsPanel } from "@/components/settings/sessions-panel";
 import { TwoFactorPanel } from "@/components/settings/two-factor-panel";
 import {
   Dialog,
@@ -663,6 +664,8 @@ export function SettingsShell({
             enabled={twoFactor.enabled}
             required={twoFactor.required}
           />
+
+          <SessionsPanel />
 
           <div className="panel p-6 sm:p-8">
             <div className="space-y-5">

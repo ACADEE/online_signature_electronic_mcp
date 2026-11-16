@@ -22,7 +22,13 @@ import {
   requireConfigValue,
   ServiceConfigurationError,
 } from "../services/service-config.ts";
-import { evaluateSignupRequest, getBranding } from "../settings.ts";
+import {
+  evaluateSignupRequest,
+  getBranding,
+  getSettings,
+  isMissingSchemaError,
+} from "../settings.ts";
+import { enforceSessionLimits } from "../session-controls.ts";
 import {
   getEnv,
   resolveDeploymentOrigins,
@@ -495,9 +501,33 @@ export function getAuth(): AppAuth {
 }
 
 export async function getAuthSessionFromHeaders(requestHeaders: Headers) {
-  return getAuth().api.getSession({
+  const session = await getAuth().api.getSession({
     headers: requestHeaders,
   });
+
+  if (!session) {
+    return null;
+  }
+
+  // The session cookie can vouch for a session for a few minutes on its
+  // own. Its row decides: one that was ended (signed out everywhere, reset
+  // by an administrator) or that is past the install's limits does not
+  // count. See session-controls.ts.
+  try {
+    const allowed = await enforceSessionLimits(
+      session.session.token,
+      await getSettings(),
+    );
+
+    return allowed ? session : null;
+  } catch (error) {
+    // A database from before the session controls: nothing to enforce yet.
+    if (isMissingSchemaError(error)) {
+      return session;
+    }
+
+    throw error;
+  }
 }
 
 const getCachedAuthSession = cache(async () => {

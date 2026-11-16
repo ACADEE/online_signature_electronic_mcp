@@ -28,6 +28,7 @@ export const systemAuditEventTypes = [
   "sign_in_failed",
   "sign_in_locked",
   "signed_out",
+  "sessions_revoked",
   "password_changed",
   "password_reset",
   "two_factor_enabled",

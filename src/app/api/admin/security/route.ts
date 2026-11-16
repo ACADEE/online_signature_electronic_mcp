@@ -13,13 +13,20 @@ import {
 } from "@/lib/security/request";
 import { getSettings, readStoredSettings } from "@/lib/settings";
 import {
+  parseSessionLimit,
+  SESSION_IDLE_CHOICES,
+  SESSION_MAX_HOURS_CHOICES,
+} from "@/lib/session-controls";
+import {
+  setSessionLimits,
   setTwoFactorRequirement,
   SignInSecurityError,
 } from "@/lib/sign-in-security";
 
 const noStore = { "cache-control": "private, no-store" };
 
-// Turns the two-step sign-in requirement on or off. Administrators only.
+// Sign-in security settings: whether two-step sign-in is required, or the
+// two session limits (both at once). Administrators only.
 export async function PUT(request: Request) {
   const sessionResult = await requireAdminSession(request);
 
@@ -43,11 +50,35 @@ export async function PUT(request: Request) {
 
   const body = (await request.json().catch(() => null)) as {
     requireTwoFactor?: unknown;
+    sessionIdleMinutes?: unknown;
+    sessionMaxHours?: unknown;
   } | null;
+  const changesRequirement = typeof body?.requireTwoFactor === "boolean";
+  const changesSessions =
+    body !== null &&
+    ("sessionIdleMinutes" in body || "sessionMaxHours" in body);
+  const sessionIdleMinutes = parseSessionLimit(
+    body?.sessionIdleMinutes,
+    SESSION_IDLE_CHOICES,
+  );
+  const sessionMaxHours = parseSessionLimit(
+    body?.sessionMaxHours,
+    SESSION_MAX_HOURS_CHOICES,
+  );
 
-  if (typeof body?.requireTwoFactor !== "boolean") {
+  if (
+    !changesRequirement &&
+    !(
+      changesSessions &&
+      sessionIdleMinutes !== undefined &&
+      sessionMaxHours !== undefined
+    )
+  ) {
     return NextResponse.json(
-      { error: "Say whether two-step sign-in should be required." },
+      {
+        error:
+          "Say whether two-step sign-in should be required, or choose both session limits.",
+      },
       { headers: noStore, status: 400 },
     );
   }
@@ -59,21 +90,30 @@ export async function PUT(request: Request) {
     );
   }
 
+  const actor = {
+    email: session.user.email,
+    ipAddress: getClientIpAddress(request.headers),
+    userAgent: getRequestUserAgent(request.headers),
+    userId: session.user.id,
+  };
+
   try {
-    await setTwoFactorRequirement(
-      {
-        email: session.user.email,
-        ipAddress: getClientIpAddress(request.headers),
-        userAgent: getRequestUserAgent(request.headers),
-        userId: session.user.id,
-      },
-      body.requireTwoFactor,
-    );
+    if (changesRequirement) {
+      await setTwoFactorRequirement(actor, body?.requireTwoFactor === true);
+    } else {
+      await setSessionLimits(actor, {
+        sessionIdleMinutes: sessionIdleMinutes ?? null,
+        sessionMaxHours: sessionMaxHours ?? null,
+      });
+    }
+
+    const stored = await readStoredSettings();
 
     return NextResponse.json(
       {
-        requireTwoFactor:
-          (await readStoredSettings())?.requireTwoFactor ?? false,
+        requireTwoFactor: stored?.requireTwoFactor ?? false,
+        sessionIdleMinutes: stored?.sessionIdleMinutes ?? null,
+        sessionMaxHours: stored?.sessionMaxHours ?? null,
       },
       { headers: noStore },
     );

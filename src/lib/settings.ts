@@ -46,6 +46,13 @@ export type AppSettings = {
    */
   requireTwoFactor: boolean;
   /**
+   * Minutes a signed-in session may go unused before it ends, or null for
+   * no limit. See session-controls.ts.
+   */
+  sessionIdleMinutes: number | null;
+  /** Hours after sign-in when a session ends, or null for 7 days. */
+  sessionMaxHours: number | null;
+  /**
    * Days a finished envelope is kept before the nightly job deletes it, or
    * null to keep finished envelopes until someone deletes them.
    */
@@ -98,6 +105,8 @@ type AppSettingsRow = {
   require_two_factor: boolean;
   retention_days: number | null;
   sender_address: string | null;
+  session_idle_minutes: number | null;
+  session_max_hours: number | null;
   setup_completed_at: number | null;
   signup_mode: SignupMode;
   support_address: string | null;
@@ -127,6 +136,7 @@ const LATER_SETTINGS_COLUMNS = [
   ["brand_color", "logo_hash"], // 20261114120000_branding
   ["part11_mode"], // 20261115090000_part11_mode
   ["require_two_factor"], // 20261117090000_sign_in_security
+  ["session_idle_minutes", "session_max_hours"], // 20261117100000_session_controls
 ] as const;
 
 type LaterSettingsColumn = (typeof LATER_SETTINGS_COLUMNS)[number][number];
@@ -159,6 +169,8 @@ const UNSET_SETTINGS: AppSettings = {
   requireTwoFactor: false,
   retentionDays: null,
   senderAddress: null,
+  sessionIdleMinutes: null,
+  sessionMaxHours: null,
   setupCompletedAt: null,
   signupMode: "open",
   supportAddress: null,
@@ -226,6 +238,8 @@ function mapSettingsRow(row: StoredSettingsRow): AppSettings {
     requireTwoFactor: row.require_two_factor ?? false,
     retentionDays: row.retention_days ?? null,
     senderAddress: row.sender_address,
+    sessionIdleMinutes: row.session_idle_minutes ?? null,
+    sessionMaxHours: row.session_max_hours ?? null,
     setupCompletedAt: row.setup_completed_at,
     signupMode: row.signup_mode,
     supportAddress: row.support_address,
@@ -389,10 +403,12 @@ async function saveSettingsLocked(
         brand_color,
         part11_mode,
         require_two_factor,
+        session_idle_minutes,
+        session_max_hours,
         created_at,
         updated_at
       )
-      values (true, $1, $2, $3, $4, $5, $6, $7, $8, $9, $11, $12, $13, $14, $10, $10)
+      values (true, $1, $2, $3, $4, $5, $6, $7, $8, $9, $11, $12, $13, $14, $15, $16, $10, $10)
       on conflict (id) do update set
         allowed_email_domains = excluded.allowed_email_domains,
         email_ready_at = excluded.email_ready_at,
@@ -407,6 +423,8 @@ async function saveSettingsLocked(
         brand_color = excluded.brand_color,
         part11_mode = excluded.part11_mode,
         require_two_factor = excluded.require_two_factor,
+        session_idle_minutes = excluded.session_idle_minutes,
+        session_max_hours = excluded.session_max_hours,
         updated_at = excluded.updated_at
       returning ${SETTINGS_COLUMNS}
     `,
@@ -425,6 +443,8 @@ async function saveSettingsLocked(
       next.brandColor,
       next.part11Mode,
       next.requireTwoFactor,
+      next.sessionIdleMinutes,
+      next.sessionMaxHours,
     ],
   );
 

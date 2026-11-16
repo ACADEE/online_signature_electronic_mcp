@@ -16,6 +16,12 @@ release says when it does.
 - Administrators can require two-step sign-in of everyone (Settings,
   Organization, Sign-in security), and reset it for someone who lost their
   phone (People).
+- Session limits: administrators can sign people out after a time without
+  use (15 minutes to 8 hours) and at the latest a set time after sign-in
+  (8 hours to 3 days). Anyone can sign out on every device at once.
+- A session that was ended (signed out everywhere, or reset by an
+  administrator) stops working at once, not when the short-lived session
+  cookie runs out.
 - Ten wrong passwords for one email address within 15 minutes stop sign-in
   for that address for 15 minutes.
 - The site audit trail now records sign-ins, failed sign-ins, lockouts,
@@ -24,8 +30,8 @@ release says when it does.
   to the new Sign-in security panel, and is there whether or not Part 11
   mode is on.
 
-This release changes the database (`20261117090000_sign_in_security.sql`),
-which the production build applies.
+This release changes the database (`20261117090000_sign_in_security.sql`,
+`20261117100000_session_controls.sql`), which the production build applies.
 
 ## [0.2.1] - 2026-11-16
 
