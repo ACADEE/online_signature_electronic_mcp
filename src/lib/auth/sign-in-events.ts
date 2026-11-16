@@ -346,6 +346,16 @@ async function afterPasswordSignIn(
   }
 }
 
+function hasSessionToken(returned: unknown): boolean {
+  return (
+    typeof returned === "object" &&
+    returned !== null &&
+    "token" in returned &&
+    typeof returned.token === "string" &&
+    returned.token.length > 0
+  );
+}
+
 async function afterSecondStep(
   ctx: HookContext,
   returned: unknown,
@@ -368,6 +378,7 @@ async function afterSecondStep(
 
     if (
       !failed &&
+      ctx.path === "/two-factor/verify-totp" &&
       user &&
       typeof returned === "object" &&
       returned !== null &&
@@ -414,7 +425,9 @@ async function afterSecondStep(
 
   const user = readUser(returned);
 
-  if (!user) {
+  // A check made with disableSession issues no session, so it is not a
+  // finished sign-in.
+  if (!user || !hasSessionToken(returned)) {
     return;
   }
 

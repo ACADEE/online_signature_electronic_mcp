@@ -29,6 +29,7 @@ import {
   isMissingSchemaError,
 } from "../settings.ts";
 import { enforceSessionLimits } from "../session-controls.ts";
+import { clearFailedSignIns } from "../sign-in-security.ts";
 import {
   getEnv,
   resolveDeploymentOrigins,
@@ -362,6 +363,8 @@ export function createAppAuth({
       revokeSessionsOnPasswordReset: true,
       onPasswordReset: async ({ user }) => {
         try {
+          // The new password ends a lockout from wrong guesses at the old one.
+          await clearFailedSignIns(user.email);
           await recordSystemAuditEvent({
             actorEmail: user.email,
             actorUserId: user.id,

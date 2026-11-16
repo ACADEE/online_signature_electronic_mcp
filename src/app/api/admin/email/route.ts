@@ -94,21 +94,17 @@ export async function POST(request: Request) {
 
     const status =
       parsed.data.action === "add_domain"
-        ? await addEmailDomain()
+        ? await addEmailDomain({
+            // Only a domain Resend actually created is a change to record.
+            onDomainCreated: (domain) =>
+              recordAdminActivity({
+                event: "email_domain_changed",
+                metadata: { action: "added", domain },
+                request,
+                user: session.user,
+              }),
+          })
         : await recheckEmailDomain();
-
-    if (parsed.data.action === "add_domain") {
-      await recordAdminActivity({
-        event: "email_domain_changed",
-        metadata: {
-          action: "added",
-          domain: "domain" in status ? status.domain : null,
-          state: status.state,
-        },
-        request,
-        user: session.user,
-      });
-    }
 
     return NextResponse.json({ status });
   } catch (error) {
