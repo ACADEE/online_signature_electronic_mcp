@@ -8,6 +8,7 @@ import {
   recheckEmailDomain,
 } from "@/lib/email-status";
 import { sendTestEmail } from "@/lib/email-test";
+import { recordAdminActivity } from "@/lib/services/admin-activity";
 import { logRouteError } from "@/lib/security/logging";
 import {
   applyRateLimit,
@@ -95,6 +96,19 @@ export async function POST(request: Request) {
       parsed.data.action === "add_domain"
         ? await addEmailDomain()
         : await recheckEmailDomain();
+
+    if (parsed.data.action === "add_domain") {
+      await recordAdminActivity({
+        event: "email_domain_changed",
+        metadata: {
+          action: "added",
+          domain: "domain" in status ? status.domain : null,
+          state: status.state,
+        },
+        request,
+        user: session.user,
+      });
+    }
 
     return NextResponse.json({ status });
   } catch (error) {

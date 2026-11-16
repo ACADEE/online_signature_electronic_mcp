@@ -41,6 +41,11 @@ export type AppSettings = {
   part11Mode: boolean;
   privacyUrl: string | null;
   /**
+   * Everyone must set up two-step sign-in (an authenticator app) before
+   * they can use the app. See sign-in-security.ts.
+   */
+  requireTwoFactor: boolean;
+  /**
    * Days a finished envelope is kept before the nightly job deletes it, or
    * null to keep finished envelopes until someone deletes them.
    */
@@ -90,6 +95,7 @@ type AppSettingsRow = {
   organization_name: string | null;
   part11_mode: boolean;
   privacy_url: string | null;
+  require_two_factor: boolean;
   retention_days: number | null;
   sender_address: string | null;
   setup_completed_at: number | null;
@@ -120,6 +126,7 @@ const LATER_SETTINGS_COLUMNS = [
   ["retention_days"], // 20261113090000_signature_evidence
   ["brand_color", "logo_hash"], // 20261114120000_branding
   ["part11_mode"], // 20261115090000_part11_mode
+  ["require_two_factor"], // 20261117090000_sign_in_security
 ] as const;
 
 type LaterSettingsColumn = (typeof LATER_SETTINGS_COLUMNS)[number][number];
@@ -149,6 +156,7 @@ const UNSET_SETTINGS: AppSettings = {
   organizationName: null,
   part11Mode: false,
   privacyUrl: null,
+  requireTwoFactor: false,
   retentionDays: null,
   senderAddress: null,
   setupCompletedAt: null,
@@ -215,6 +223,7 @@ function mapSettingsRow(row: StoredSettingsRow): AppSettings {
     organizationName: row.organization_name,
     part11Mode: row.part11_mode ?? false,
     privacyUrl: row.privacy_url,
+    requireTwoFactor: row.require_two_factor ?? false,
     retentionDays: row.retention_days ?? null,
     senderAddress: row.sender_address,
     setupCompletedAt: row.setup_completed_at,
@@ -379,10 +388,11 @@ async function saveSettingsLocked(
         retention_days,
         brand_color,
         part11_mode,
+        require_two_factor,
         created_at,
         updated_at
       )
-      values (true, $1, $2, $3, $4, $5, $6, $7, $8, $9, $11, $12, $13, $10, $10)
+      values (true, $1, $2, $3, $4, $5, $6, $7, $8, $9, $11, $12, $13, $14, $10, $10)
       on conflict (id) do update set
         allowed_email_domains = excluded.allowed_email_domains,
         email_ready_at = excluded.email_ready_at,
@@ -396,6 +406,7 @@ async function saveSettingsLocked(
         retention_days = excluded.retention_days,
         brand_color = excluded.brand_color,
         part11_mode = excluded.part11_mode,
+        require_two_factor = excluded.require_two_factor,
         updated_at = excluded.updated_at
       returning ${SETTINGS_COLUMNS}
     `,
@@ -413,6 +424,7 @@ async function saveSettingsLocked(
       next.retentionDays,
       next.brandColor,
       next.part11Mode,
+      next.requireTwoFactor,
     ],
   );
 

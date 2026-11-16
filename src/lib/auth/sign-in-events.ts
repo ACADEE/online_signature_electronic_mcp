@@ -1,0 +1,425 @@
+import type { BetterAuthPlugin } from "better-auth";
+import {
+  APIError,
+  createAuthMiddleware,
+  getSessionFromCtx,
+  isAPIError,
+} from "better-auth/api";
+
+import { getDb, queryOne } from "../db/connection.ts";
+import { logSecurityEvent } from "../security/logging.ts";
+import { getSettings } from "../settings.ts";
+import {
+  getClientIpAddress,
+  getRequestUserAgent,
+} from "../security/request.ts";
+import {
+  recordSystemAuditEvent,
+  type RecordSystemAuditEventInput,
+} from "../services/system-audit.ts";
+import {
+  clearFailedSignIns,
+  countFailedSignIn,
+  getSignInLockState,
+  MAX_FAILED_SIGN_INS,
+  SIGN_IN_LOCKED_MESSAGE,
+} from "../sign-in-security.ts";
+
+// Puts sign-ins and changes to how people sign in into the install's audit
+// trail, and stops sign-in for an address after too many wrong passwords
+// (sign-in-security.ts has the rules).
+//
+// It is a Better Auth plugin, listed after the two-factor plugin, because
+// plugin hooks run in the order the plugins are listed: by the time this
+// one sees a password sign-in, the two-factor plugin has already turned it
+// into a request for the second step, or let it through.
+
+const TWO_FACTOR_COOKIE_NAME = "two_factor";
+
+const SECOND_STEP_PATHS = new Set([
+  "/two-factor/verify-backup-code",
+  "/two-factor/verify-otp",
+  "/two-factor/verify-totp",
+]);
+
+// Paths whose actor is only known before the endpoint runs: each replaces
+// or ends the session it was called with.
+const SESSION_FIRST_PATHS = new Set([
+  "/sign-out",
+  "/two-factor/disable",
+  "/two-factor/generate-backup-codes",
+]);
+
+type Actor = { email: string; userId: string };
+
+type HookContext = Parameters<Parameters<typeof createAuthMiddleware>[0]>[0];
+
+function readEmail(body: unknown): string | null {
+  if (
+    typeof body === "object" &&
+    body !== null &&
+    "email" in body &&
+    typeof body.email === "string" &&
+    body.email.trim()
+  ) {
+    return body.email.trim().toLowerCase();
+  }
+
+  return null;
+}
+
+function readUser(value: unknown): { email: string; id: string } | null {
+  if (typeof value !== "object" || value === null || !("user" in value)) {
+    return null;
+  }
+
+  const user: unknown = value.user;
+
+  if (
+    typeof user === "object" &&
+    user !== null &&
+    "id" in user &&
+    typeof user.id === "string" &&
+    "email" in user &&
+    typeof user.email === "string"
+  ) {
+    return { email: user.email, id: user.id };
+  }
+
+  return null;
+}
+
+function readFailureCode(returned: unknown): string {
+  if (isAPIError(returned)) {
+    const body: unknown = returned.body;
+
+    if (
+      typeof body === "object" &&
+      body !== null &&
+      "code" in body &&
+      typeof body.code === "string"
+    ) {
+      return body.code;
+    }
+
+    return returned.status ? String(returned.status) : "error";
+  }
+
+  return "error";
+}
+
+function requestDetails(ctx: HookContext) {
+  const headers = ctx.headers ?? ctx.request?.headers ?? new Headers();
+
+  return {
+    ipAddress: getClientIpAddress(headers),
+    userAgent: getRequestUserAgent(headers),
+  };
+}
+
+async function findUserIdByEmail(email: string): Promise<string | null> {
+  const row = await queryOne<{ id: string }>(
+    getDb(),
+    `SELECT id FROM "user" WHERE lower(email) = $1`,
+    [email],
+  );
+
+  return row?.id ?? null;
+}
+
+/**
+ * Writes one event. A sign-in is never refused or undone because its record
+ * could not be written; the failure is logged instead.
+ */
+async function record(
+  ctx: HookContext,
+  input: Omit<RecordSystemAuditEventInput, "ipAddress" | "userAgent">,
+) {
+  try {
+    await recordSystemAuditEvent({ ...input, ...requestDetails(ctx) });
+  } catch (error) {
+    logSecurityEvent("error", {
+      category: "sign_in_audit_failure",
+      message: `Could not record "${input.event}" in the audit trail.`,
+      metadata: { error: error instanceof Error ? error.message : "unknown" },
+      userId: input.actorUserId ?? null,
+    });
+  }
+}
+
+export function signInEvents() {
+  const sessionActors = new WeakMap<Request, Actor>();
+
+  return {
+    id: "signudoc-sign-in-events",
+    hooks: {
+      before: [
+        {
+          matcher: (ctx) => ctx.path === "/sign-in/email",
+          handler: createAuthMiddleware(async (ctx) => {
+            const email = readEmail(ctx.body);
+
+            if (!email) {
+              return;
+            }
+
+            const lock = await getSignInLockState(email);
+
+            if (lock.locked) {
+              throw new APIError("TOO_MANY_REQUESTS", {
+                code: "SIGN_IN_LOCKED",
+                message: SIGN_IN_LOCKED_MESSAGE,
+              });
+            }
+          }),
+        },
+        {
+          // An install that requires two-step sign-in does not let anyone
+          // turn theirs off. An administrator can still reset it for
+          // someone who lost their phone, and they set it up again.
+          matcher: (ctx) => ctx.path === "/two-factor/disable",
+          handler: createAuthMiddleware(async () => {
+            if ((await getSettings()).requireTwoFactor) {
+              throw new APIError("FORBIDDEN", {
+                code: "TWO_FACTOR_REQUIRED_BY_ADMINISTRATOR",
+                message:
+                  "Your organization requires two-step sign-in, so it cannot be turned off.",
+              });
+            }
+          }),
+        },
+        {
+          matcher: (ctx) => SESSION_FIRST_PATHS.has(ctx.path ?? ""),
+          handler: createAuthMiddleware(async (ctx) => {
+            if (!ctx.request) {
+              return;
+            }
+
+            const session = await getSessionFromCtx(ctx).catch(() => null);
+
+            if (session) {
+              sessionActors.set(ctx.request, {
+                email: session.user.email,
+                userId: session.user.id,
+              });
+            }
+          }),
+        },
+      ],
+      after: [
+        {
+          matcher: (ctx) =>
+            ctx.path === "/sign-in/email" ||
+            ctx.path === "/change-password" ||
+            SECOND_STEP_PATHS.has(ctx.path ?? "") ||
+            SESSION_FIRST_PATHS.has(ctx.path ?? ""),
+          handler: createAuthMiddleware(async (ctx) => {
+            const returned: unknown = ctx.context.returned;
+            const failed = isAPIError(returned) || returned instanceof Error;
+            const path = ctx.path ?? "";
+
+            if (path === "/sign-in/email") {
+              await afterPasswordSignIn(ctx, returned, failed);
+              return;
+            }
+
+            if (SECOND_STEP_PATHS.has(path)) {
+              await afterSecondStep(ctx, returned, failed);
+              return;
+            }
+
+            if (failed) {
+              return;
+            }
+
+            if (path === "/change-password") {
+              const user = readUser(returned);
+
+              if (user) {
+                await record(ctx, {
+                  actorEmail: user.email,
+                  actorUserId: user.id,
+                  event: "password_changed",
+                  targetUserId: user.id,
+                });
+              }
+
+              return;
+            }
+
+            const actor = ctx.request
+              ? sessionActors.get(ctx.request)
+              : undefined;
+
+            if (!actor) {
+              return;
+            }
+
+            await record(ctx, {
+              actorEmail: actor.email,
+              actorUserId: actor.userId,
+              event:
+                path === "/sign-out"
+                  ? "signed_out"
+                  : path === "/two-factor/disable"
+                    ? "two_factor_disabled"
+                    : "two_factor_backup_codes_regenerated",
+              targetUserId: actor.userId,
+            });
+          }),
+        },
+      ],
+    },
+  } satisfies BetterAuthPlugin;
+}
+
+async function afterPasswordSignIn(
+  ctx: HookContext,
+  returned: unknown,
+  failed: boolean,
+) {
+  const email = readEmail(ctx.body);
+
+  if (!email) {
+    return;
+  }
+
+  if (failed) {
+    const code = readFailureCode(returned);
+    // The password was right; the address is not confirmed yet. Not a
+    // guess, so it does not count towards the lockout.
+    const wrongPassword = code !== "EMAIL_NOT_VERIFIED";
+    const counted = wrongPassword ? await countFailedSignIn(email) : null;
+    const userId = await findUserIdByEmail(email).catch(() => null);
+
+    await record(ctx, {
+      actorEmail: email,
+      actorUserId: userId,
+      event: "sign_in_failed",
+      metadata: {
+        method: "password",
+        reason: code,
+        ...(counted ? { failuresInWindow: counted.failures } : {}),
+      },
+      targetUserId: userId,
+    });
+
+    if (counted?.justLocked) {
+      await record(ctx, {
+        actorEmail: email,
+        actorUserId: userId,
+        event: "sign_in_locked",
+        metadata: { failuresInWindow: MAX_FAILED_SIGN_INS },
+        targetUserId: userId,
+      });
+    }
+
+    return;
+  }
+
+  // The password was right but a second step is still to come. The sign-in
+  // is recorded when that step is done.
+  if (
+    typeof returned === "object" &&
+    returned !== null &&
+    "twoFactorRedirect" in returned
+  ) {
+    return;
+  }
+
+  const user = readUser(returned);
+
+  await clearFailedSignIns(email);
+
+  if (user) {
+    await record(ctx, {
+      actorEmail: user.email,
+      actorUserId: user.id,
+      event: "sign_in_succeeded",
+      metadata: { method: "password" },
+      targetUserId: user.id,
+    });
+  }
+}
+
+async function afterSecondStep(
+  ctx: HookContext,
+  returned: unknown,
+  failed: boolean,
+) {
+  const challengeCookie = await ctx
+    .getSignedCookie(
+      ctx.context.createAuthCookie(TWO_FACTOR_COOKIE_NAME).name,
+      ctx.context.secret,
+    )
+    .catch(() => null);
+  const method =
+    ctx.path === "/two-factor/verify-backup-code"
+      ? "backup_code"
+      : "authenticator";
+
+  // A signed-in person confirming the authenticator they are setting up.
+  if (!challengeCookie) {
+    const user = readUser(returned);
+
+    if (
+      !failed &&
+      user &&
+      typeof returned === "object" &&
+      returned !== null &&
+      "user" in returned &&
+      (returned.user as { twoFactorEnabled?: unknown }).twoFactorEnabled ===
+        false
+    ) {
+      await record(ctx, {
+        actorEmail: user.email,
+        actorUserId: user.id,
+        event: "two_factor_enabled",
+        targetUserId: user.id,
+      });
+    }
+
+    return;
+  }
+
+  if (failed) {
+    const pending = await ctx.context.internalAdapter
+      .findVerificationValue(challengeCookie)
+      .catch(() => null);
+    const userId = pending?.value ?? null;
+    const email = userId
+      ? await queryOne<{ email: string }>(
+          getDb(),
+          `SELECT email FROM "user" WHERE id = $1`,
+          [userId],
+        )
+          .then((row) => row?.email ?? null)
+          .catch(() => null)
+      : null;
+
+    await record(ctx, {
+      actorEmail: email,
+      actorUserId: userId,
+      event: "sign_in_failed",
+      metadata: { method, reason: readFailureCode(returned) },
+      targetUserId: userId,
+    });
+
+    return;
+  }
+
+  const user = readUser(returned);
+
+  if (!user) {
+    return;
+  }
+
+  await clearFailedSignIns(user.email);
+  await record(ctx, {
+    actorEmail: user.email,
+    actorUserId: user.id,
+    event: "sign_in_succeeded",
+    metadata: { method: "password", secondStep: method },
+    targetUserId: user.id,
+  });
+}

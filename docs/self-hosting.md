@@ -154,6 +154,16 @@ The first time you open a new install it takes you to `/setup`. There you name y
 - **`SETUP_TOKEN`.** A new install can be claimed by whoever opens it first. If its URL will be public before you get to it, set `SETUP_TOKEN` to a secret of your own and the setup page will ask for it.
 - **An install from before this page existed** has accounts but no administrator. Set `SETUP_TOKEN`, sign in with the account that should be in charge, and open `/setup`. It asks for a support address if the install has none. Sign-up stays open, as it was, until that administrator changes it.
 
+## Sign-in security
+
+These cover the people with an account (senders and administrators). Signers who are only sent a document open it from their emailed link and are not affected.
+
+- **Two-step sign-in.** Anyone can turn it on under Settings, Two-step sign-in: after the password, the site asks for a 6-digit code from an authenticator app such as 1Password, Google Authenticator or Microsoft Authenticator. Setting it up gives ten single-use backup codes for when the phone is not at hand. The key and the backup codes are stored encrypted with `BETTER_AUTH_SECRET`, so keep that secret the same: a new one makes every authenticator stop working.
+- **Requiring it.** An administrator can require two-step sign-in of everyone under Settings, Organization, Sign-in security. They have to use it themselves first. From then on anyone who has not set it up sees only the setup page until they have, the API refuses their requests too, and nobody can turn theirs off.
+- **Lost phone.** If someone loses their phone and their backup codes, an administrator can reset their two-step sign-in under People. That turns it off and signs them out everywhere; they sign in with their password and set it up again (at once, if it is required). A session lasts until it ends or, at most, five minutes after it was reset, because sessions are briefly cached in a signed cookie.
+- **Wrong passwords.** Ten wrong passwords for one email address within 15 minutes stop sign-in for that address until the 15 minutes are up. This happens whether or not the address has an account, so it says nothing about which ones do. Ten wrong codes at the second step lock that step for 15 minutes in the same way.
+- **The site audit trail** (Settings, Organization, Sign-in security) records each sign-in and failed sign-in with the address it came from, lockouts, sign-outs, password changes and resets, two-step sign-in being turned on, off or reset, new backup codes, and changes to settings, roles, the logo, the email domain, identity confirmations and signing locks. The rows form one hash chain, so a changed or removed row shows, and the trail downloads as CSV.
+
 ## Your responsibilities
 
 Your install carries your organization's name, not SignuDoc's. In Settings, link your own terms and privacy policy (without a privacy link, signers see a notice built from your settings at `/signer-privacy`; check it), keep the support address you gave at setup pointed at a mailbox someone reads, and choose how long finished documents are kept. Under GDPR your organization is the controller; Settings, Organization has the tools to answer a signer who asks for their data or for its erasure.

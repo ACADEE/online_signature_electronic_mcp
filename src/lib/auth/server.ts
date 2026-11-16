@@ -1,7 +1,7 @@
 import { APIError, betterAuth } from "better-auth";
 import { createAuthMiddleware } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
-import { haveIBeenPwned } from "better-auth/plugins";
+import { haveIBeenPwned, twoFactor } from "better-auth/plugins";
 import { headers } from "next/headers";
 import { redirect, unstable_rethrow } from "next/navigation";
 import { after } from "next/server";
@@ -30,6 +30,8 @@ import {
 } from "../utils/env.ts";
 import { escapeHtml } from "../utils/html.ts";
 import { isRunningSetup } from "./setup-context.ts";
+import { signInEvents } from "./sign-in-events.ts";
+import { recordSystemAuditEvent } from "../services/system-audit.ts";
 
 type CreateAppAuthOptions = {
   database?: Pool;
@@ -274,6 +276,21 @@ export function createAppAuth({
           }),
         ]
       : []),
+    // Two-step sign-in with an authenticator app, and ten single-use backup
+    // codes for when the phone is not at hand. Both are stored encrypted
+    // with BETTER_AUTH_SECRET. "Trust this device" is not offered, so every
+    // sign-in asks for the second step.
+    twoFactor({
+      accountLockout: {
+        durationSeconds: 15 * 60,
+        enabled: true,
+        maxFailedAttempts: 10,
+      },
+      backupCodeOptions: { amount: 10, length: 10 },
+      skipVerificationOnEnable: false,
+    }),
+    // After the two-factor plugin: see sign-in-events.ts.
+    signInEvents(),
     ...(includeNextCookies ? [nextCookies()] : []),
   ];
   return betterAuth({
@@ -337,6 +354,18 @@ export function createAppAuth({
       minPasswordLength: 15,
       requireEmailVerification: true,
       revokeSessionsOnPasswordReset: true,
+      onPasswordReset: async ({ user }) => {
+        try {
+          await recordSystemAuditEvent({
+            actorEmail: user.email,
+            actorUserId: user.id,
+            event: "password_reset",
+            targetUserId: user.id,
+          });
+        } catch (error) {
+          console.error("[auth] Could not record a password reset:", error);
+        }
+      },
       sendResetPassword: async ({ url, user }) => {
         sendAuthEmailInBackground({
           buildContent: (branding) =>

@@ -6,6 +6,27 @@ All notable changes to SignuDoc are recorded here. The format follows
 change settings or the database in ways that need a migration step; each
 release says when it does.
 
+## [Unreleased]
+
+### Sign-in security
+
+- Two-step sign-in: anyone with an account can add an authenticator app
+  under Settings, with ten single-use backup codes. Signing in then asks for
+  a code after the password.
+- Administrators can require two-step sign-in of everyone (Settings,
+  Organization, Sign-in security), and reset it for someone who lost their
+  phone (People).
+- Ten wrong passwords for one email address within 15 minutes stop sign-in
+  for that address for 15 minutes.
+- The site audit trail now records sign-ins, failed sign-ins, lockouts,
+  sign-outs, password changes and resets, two-step sign-in changes, logo
+  changes and the email domain being added. It moved from the Part 11 panel
+  to the new Sign-in security panel, and is there whether or not Part 11
+  mode is on.
+
+This release changes the database (`20261117090000_sign_in_security.sql`),
+which the production build applies.
+
 ## [0.2.1] - 2026-11-16
 
 A smoother first deploy. No database change: this release needs no

@@ -24,6 +24,19 @@ export const systemAuditEventTypes = [
   "signing_locked",
   "signing_unlocked",
   "reauthentication_failed",
+  "sign_in_succeeded",
+  "sign_in_failed",
+  "sign_in_locked",
+  "signed_out",
+  "password_changed",
+  "password_reset",
+  "two_factor_enabled",
+  "two_factor_disabled",
+  "two_factor_backup_codes_regenerated",
+  "two_factor_reset",
+  "two_factor_requirement_changed",
+  "logo_changed",
+  "email_domain_changed",
 ] as const;
 
 export type SystemAuditEventType = (typeof systemAuditEventTypes)[number];

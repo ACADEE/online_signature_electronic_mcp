@@ -46,6 +46,8 @@ export type OrganizationSettingsView = {
   logoUrl: string | null;
   organizationName: string;
   privacyUrl: string;
+  /** Everyone must use two-step sign-in. Changed in the security panel. */
+  requireTwoFactor: boolean;
   /** Days, as typed. Empty keeps finished envelopes until deleted by hand. */
   retentionDays: string;
   senderAddress: string;
@@ -70,6 +72,7 @@ export function toOrganizationSettingsView(
     organizationName: settings.organizationName ?? "",
     part11Mode: settings.part11Mode,
     privacyUrl: settings.privacyUrl ?? "",
+    requireTwoFactor: settings.requireTwoFactor,
     retentionDays:
       settings.retentionDays === null ? "" : String(settings.retentionDays),
     senderAddress: settings.senderAddress ?? "",
