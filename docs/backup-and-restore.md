@@ -25,6 +25,8 @@ From then on Vercel calls `/api/internal/backup` every day at 08:00 UTC (see `ve
 - copies every file that is new or changed since the last run to `files/<same path>`. A run copies for up to four minutes; a first backup of a large install may take a few days to catch up, and each later run only copies what changed;
 - keeps the copy of a file that was deleted from the install (by the retention rules, for example) for `BACKUP_KEEP_DAYS` more days, then removes it, so the backup does not hold a document much longer than your retention rules allow.
 
+To run one by hand (while cron jobs are paused, for example), call the same address with the secret: `curl -H "Authorization: Bearer $CRON_SECRET" https://<your install>/api/internal/backup`.
+
 Each run writes a `backup_finished` line to the function logs (with the counts), or `backup_failure` if it failed. With a log drain, alert on those. The app refuses a token for its own store, because that backup would not survive what it is for.
 
 **Cost.** The backup store holds about as much as the install's store, plus the database copies. On a Vercel Hobby account, a second store in the same account counts against the same free Blob storage, so it halves how much your install can hold for $0. A store in another team has its own allowance. Each copied file is one upload to the backup store.
@@ -52,7 +54,7 @@ You need a computer with Node.js 24 and a copy of this repository at the same ve
 
    `--backup database/<name>` restores an older one instead. The script applies the migrations, loads the database in one transaction (so a failed restore leaves nothing half done), then copies the files back to their own paths. It refuses a database that already has accounts in it, and a backup made by a newer SignuDoc than the copy you are running. If copying the files stops part way (a network error, or you stopped it), run `npm run restore-backup -- --files-only` to finish: it skips the database and every file that is already there.
 
-4. Connect the new database and Blob store to the install's Vercel project (or a new one) in place of the old ones, keep `BETTER_AUTH_SECRET` the same as before, and deploy. Two-step sign-in keys are encrypted with that secret, and session cookies are signed with it; if it changes, everyone signs in again and sets up two-step sign-in again.
+4. Connect the new database and Blob store to the install's Vercel project (or a new one) in place of the old ones, keep `BETTER_AUTH_SECRET` the same as before, and deploy. Two-step sign-in keys are encrypted with that secret, and session cookies are signed with it; if it changes, everyone is signed out, and nobody who used two-step sign-in can finish signing in until their setup is cleared (see the note on two-step sign-in in [self-hosting](self-hosting.md#sign-in-security)).
 5. Sign in, open a finished document, and check its audit trail and download.
 
 What a restore brings back: everything in the database at the time of the backup, and every file as of the last run. A document sent after the last backup is not in it. The hash chains in both audit trails come back exactly as they were, so they still verify.
