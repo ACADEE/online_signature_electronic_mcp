@@ -43,6 +43,13 @@ release says when it does.
   `docs/backup-and-restore.md`. `vercel.json` has a second daily cron job,
   which does nothing until the token is set.
 
+### Project security
+
+- CodeQL, dependency review, a weekly `npm audit` and OpenSSF Scorecard run
+  on the SignuDoc repository (skipped in a copy made by the Deploy button).
+- Each release gets a CycloneDX SBOM, a source archive and signed build
+  provenance attached. `SECURITY.md` says how to verify them.
+
 This release changes the database (`20261117090000_sign_in_security.sql`,
 `20261117100000_session_controls.sql`), which the production build applies.
 
