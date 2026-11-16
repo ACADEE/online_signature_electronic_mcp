@@ -821,9 +821,12 @@ async function recordViewedEventOnce(
         WHERE envelope_id = $1
           AND event = 'viewed'
           AND metadata->>'signerId' = $2
+          -- A corrected signer keeps the row id, so the first view by the
+          -- person now at that address is recorded too.
+          AND lower(metadata->>'signerEmail') = lower($3)
         LIMIT 1
       `,
-      [context.envelope.id, context.signer.id],
+      [context.envelope.id, context.signer.id, context.signer.email],
     );
 
     if (existing) {
@@ -3077,10 +3080,11 @@ export async function declineSigningForToken(
     declinedAt,
     declineReason,
   );
-  const auditEvents = [
-    ...(await listAuditEventsForEnvelope(context.envelope.id, database)),
-    declinedAuditEvent,
-  ];
+  const auditEventsBefore = await listAuditEventsForEnvelope(
+    context.envelope.id,
+    database,
+  );
+  const auditEvents = [...auditEventsBefore, declinedAuditEvent];
   const storedCertificateKeys: string[] = [];
   let certificate: { key: string; sha256: string };
   let recipientCertificateSha256: string;
@@ -3135,6 +3139,27 @@ export async function declineSigningForToken(
         signerId: currentSignerId,
         tokenHash: presentedTokenHash,
       });
+
+      // The certificates above were made before the envelope lock. If the
+      // sender corrected another recipient in that time, they name the old
+      // person and leave the correction out, so they must not be kept.
+      const correctedSince = await tx.query(
+        `
+          SELECT 1 FROM audit_events
+          WHERE envelope_id = $1
+            AND event = 'signer_corrected'
+            AND NOT (id = ANY($2::text[]))
+          LIMIT 1
+        `,
+        [context.envelope.id, auditEventsBefore.map((event) => event.id)],
+      );
+
+      if ((correctedSince.rowCount ?? 0) > 0) {
+        throw new SigningMutationError(
+          "This envelope changed while you were declining. Open your signing link again.",
+          409,
+        );
+      }
 
       const declinedSignerResult = await tx.query(
         `

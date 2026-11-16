@@ -1493,3 +1493,135 @@ test("a failed reminder does not bring back the link a correction replaced", asy
   });
   assert.equal((await verifyAuditChain(envelopeId, database)).ok, true);
 });
+
+test("a decline whose certificate missed another signer's correction is refused", async () => {
+  const { userId } = await createOwner();
+  const envelopeId = await createEnvelope({ userId });
+  const declining = await createSigner({ envelopeId });
+  const waiting = await createSigner({
+    envelopeId,
+    signOrder: 2,
+    status: "pending",
+  });
+  const storageDir = await mkdtemp(
+    path.join(tmpdir(), "signudoc-correct-other-decline-"),
+  );
+  const storageService = createStorageService({
+    env: { STORAGE_DRIVER: "local", STORAGE_LOCAL_DIR: storageDir },
+  });
+  const sourcePdf = await PDFDocument.create();
+
+  sourcePdf.addPage([612, 792]);
+  await storageService.putObject({
+    body: await sourcePdf.save(),
+    contentType: "application/pdf",
+    key: `test/${envelopeId}.pdf`,
+  });
+  await database.query(
+    `
+      insert into envelope_pages (id, envelope_id, page_number, width_pt, height_pt)
+      values ($1, $2, 1, 612, 792)
+    `,
+    [randomUUID(), envelopeId],
+  );
+  await consent(declining.token!);
+
+  const settings = {
+    EMAIL_CAPTURE_DIR: path.join(storageDir, "outbox"),
+    EMAIL_DRIVER: "capture",
+    STORAGE_DRIVER: "local",
+    STORAGE_LOCAL_DIR: storageDir,
+  };
+  const settingsBefore = Object.keys(settings).map(
+    (name) => [name, process.env[name]] as const,
+  );
+
+  Object.assign(process.env, settings);
+
+  // The correction lands after the decline has read the audit trail for
+  // its certificate, and before it takes the envelope lock.
+  const pool = afterStatement(
+    database,
+    (text) =>
+      text.includes("FROM audit_events") &&
+      text.includes("ORDER BY sequence ASC NULLS FIRST"),
+    async () => {
+      await correct(userId, envelopeId, waiting.signerId, {
+        email: "waiting.fixed@example.test",
+      });
+    },
+  );
+
+  try {
+    await assert.rejects(
+      declineSigningForToken(
+        declining.token!,
+        { reason: "Changed mind." },
+        { database: pool },
+      ),
+      (error: unknown) => {
+        assert.ok(error instanceof SigningMutationError);
+        assert.equal(error.statusCode, 409);
+        return true;
+      },
+    );
+    assert.equal((await readSigner(declining.signerId)).status, "notified");
+    assert.equal(
+      (await readSigner(waiting.signerId)).email,
+      "waiting.fixed@example.test",
+    );
+
+    // Opening the link again and declining now works, with the correction
+    // in the certificate.
+    await declineSigningForToken(
+      declining.token!,
+      { reason: "Changed mind." },
+      { database },
+    );
+    assert.equal((await readSigner(declining.signerId)).status, "declined");
+  } finally {
+    for (const [name, value] of settingsBefore) {
+      if (value === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = value;
+      }
+    }
+
+    await rm(storageDir, { force: true, recursive: true });
+  }
+});
+
+test("the corrected recipient's first view is recorded", async () => {
+  const { userId } = await createOwner();
+  const envelopeId = await createEnvelope({ userId });
+  const signer = await createSigner({ envelopeId });
+  const { sent, service } = recordingEmailService();
+
+  await getSigningPayloadForToken(signer.token!, { database });
+  await correct(
+    userId,
+    envelopeId,
+    signer.signerId,
+    { email: "riley.viewer@example.test" },
+    service,
+  );
+
+  const match = sent[0]?.textBody.match(/\/sign\/([A-Za-z0-9_-]+)/);
+  assert.ok(match);
+  await getSigningPayloadForToken(match[1]!, { database });
+  await getSigningPayloadForToken(match[1]!, { database });
+
+  const viewed = await database.query<{ email: string }>(
+    `
+      select metadata->>'signerEmail' as email from audit_events
+      where envelope_id = $1 and event = 'viewed'
+      order by sequence
+    `,
+    [envelopeId],
+  );
+  assert.deepEqual(
+    viewed.rows.map((row) => row.email),
+    [signer.email, "riley.viewer@example.test"],
+  );
+});
