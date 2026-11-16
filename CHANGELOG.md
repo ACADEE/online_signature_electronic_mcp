@@ -8,6 +8,20 @@ release says when it does.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-16
+
+Sign-in security and audit features for organizations that need them, and
+two new ways to fix a sent envelope. This release changes the database: see
+the end of this entry.
+
+### Envelopes
+
+- A sender can correct a signer's email address after sending. The old
+  signing link stops working, the new address gets a fresh invitation, and
+  the audit trail records the correction.
+- A finished envelope can be copied into a new draft with the same document,
+  recipients and fields, and nothing that was filled in.
+
 ### Sign-in security
 
 - Two-step sign-in: anyone with an account can add an authenticator app
@@ -56,8 +70,10 @@ release says when it does.
 - Each release gets a CycloneDX SBOM, a source archive and signed build
   provenance attached. `SECURITY.md` says how to verify them.
 
-This release changes the database (`20261117090000_sign_in_security.sql`,
+This release changes the database (`20261115100000_copied_audit_event.sql`,
+`20261116100000_signer_corrected.sql`, `20261117090000_sign_in_security.sql`,
 `20261117100000_session_controls.sql`), which the production build applies.
+No step is needed by hand.
 
 ## [0.2.1] - 2026-11-16
 
@@ -187,6 +203,7 @@ checked against the real services:
 
 SignuDoc is software, not legal advice. See the README's legal disclaimer.
 
+[0.3.0]: https://github.com/NYLLON-SOFTWARE/SignuDoc/releases/tag/v0.3.0
 [0.2.1]: https://github.com/NYLLON-SOFTWARE/SignuDoc/releases/tag/v0.2.1
 [0.2.0]: https://github.com/NYLLON-SOFTWARE/SignuDoc/releases/tag/v0.2.0
 [0.1.0]: https://github.com/NYLLON-SOFTWARE/SignuDoc/releases/tag/v0.1.0
