@@ -33,6 +33,7 @@ import type {
 } from "./services/email.ts";
 import { hashOpaqueToken } from "./services/opaque-tokens.ts";
 import { renderEnvelopeCertificatePdf } from "./services/pdf-finalize.ts";
+import { sendManualEnvelopeNudge } from "./reminders.ts";
 import { issueSigningLink } from "./services/signing-links.ts";
 import {
   createStorageService,
@@ -1444,4 +1445,51 @@ test("a missing email configuration rolls the correction back", async () => {
   assert.equal(stored.signing_token_hash, signer.tokenHash);
   assert.equal(stored.consented_at, consentedAt);
   assert.deepEqual(await auditEvents(envelopeId), []);
+});
+
+test("a failed reminder does not bring back the link a correction replaced", async () => {
+  const { userId } = await createOwner();
+  const envelopeId = await createEnvelope({ userId });
+  const signer = await createSigner({ envelopeId });
+  const { sent, service: correctionService } = recordingEmailService();
+  let correctionResult: Awaited<ReturnType<typeof correct>> | undefined;
+  const failingReminder: EmailService = {
+    async send() {
+      // The sender corrects the signer while the reminder is being sent,
+      // and then the reminder fails.
+      correctionResult = await correct(
+        userId,
+        envelopeId,
+        signer.signerId,
+        { email: "fixed@example.test" },
+        correctionService,
+      );
+
+      throw new Error("mailbox down");
+    },
+    async sendBatch() {
+      throw new Error("not used");
+    },
+  };
+
+  await assert.rejects(
+    sendManualEnvelopeNudge(
+      userId,
+      envelopeId,
+      { senderEmail: "sam@example.test", senderName: "Sam Sender" },
+      { database, emailService: failingReminder },
+    ),
+    /mailbox down/,
+  );
+
+  assert.ok(correctionResult);
+  const stored = await readSigner(signer.signerId);
+  assert.equal(stored.email, "fixed@example.test");
+  assert.notEqual(stored.signing_token_hash, signer.tokenHash);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0]?.to, "fixed@example.test");
+  await assert.rejects(getSigningPayloadForToken(signer.token!, { database }), {
+    name: "SigningAccessError",
+  });
+  assert.equal((await verifyAuditChain(envelopeId, database)).ok, true);
 });
