@@ -15,7 +15,7 @@ Everything about running your own SignuDoc: deploying it, setting it up, what it
 
 ## Deploy to Vercel
 
-1. **Click "Deploy with Vercel"** in the [README](../README.md).
+1. **Click "Deploy to Vercel"** in the [README](../README.md).
 2. **Sign in to Vercel** and let it copy this repository into your GitHub account. Your site is built from that copy.
 3. **Add the three things Vercel offers to create.** Each has a free plan:
    - [Resend](https://resend.com) for sending email (it comes first because its domain takes the longest to be ready),

@@ -6,7 +6,10 @@ All notable changes to SignuDoc are recorded here. The format follows
 change settings or the database in ways that need a migration step; each
 release says when it does.
 
-## [Unreleased]
+## [0.2.1] - 2026-11-16
+
+A smoother first deploy. No database change: this release needs no
+migration step.
 
 ### Deploying
 
@@ -16,7 +19,9 @@ release says when it does.
   first deployment with "One or more integration resources failed to
   provision": wait, refresh and redeploy.
 - New [guide for AI agents](docs/deploy-with-an-agent.md) that deploy
-  SignuDoc for someone through their browser, linked from the README.
+  SignuDoc for someone through their browser.
+- The README's button now reads "Deploy to Vercel", with "or copy this to
+  your LLM" under it, linking to that guide.
 
 ## [0.2.0] - 2026-11-15
 
@@ -129,5 +134,6 @@ checked against the real services:
 
 SignuDoc is software, not legal advice. See the README's legal disclaimer.
 
+[0.2.1]: https://github.com/NYLLON-SOFTWARE/SignuDoc/releases/tag/v0.2.1
 [0.2.0]: https://github.com/NYLLON-SOFTWARE/SignuDoc/releases/tag/v0.2.0
 [0.1.0]: https://github.com/NYLLON-SOFTWARE/SignuDoc/releases/tag/v0.1.0
