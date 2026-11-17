@@ -154,8 +154,16 @@ export function createS3StorageService({
     async putObject(input) {
       const normalizedKey = normalizeStorageKey(input.key);
       const response = await request(normalizedKey, {
-        body: input.body as BodyInit,
+        // A Buffer with an explicit length: R2 refuses a chunked upload
+        // (HTTP 411 MissingContentLength), which is what a bare typed array
+        // can turn into once the request is signed.
+        body: Buffer.from(
+          input.body.buffer,
+          input.body.byteOffset,
+          input.body.byteLength,
+        ) as unknown as BodyInit,
         headers: {
+          "content-length": String(input.body.byteLength),
           "content-type": input.contentType,
           // The store itself refuses a second write: of two writers that
           // arrive together, exactly one is kept.
