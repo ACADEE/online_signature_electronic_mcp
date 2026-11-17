@@ -3,7 +3,12 @@ import { type EnvSource } from "../../utils/env.ts";
 // Which storage the app uses. Kept free of the drivers themselves so the
 // request proxy can ask without loading them.
 
-export type StorageDriver = "blob" | "local";
+export type StorageDriver = "blob" | "local" | "s3";
+
+/** True when an S3-compatible bucket (Cloudflare R2, ...) is configured. */
+export function hasS3Credentials(env: EnvSource = process.env): boolean {
+  return Boolean(env.S3_BUCKET?.trim() && env.S3_ENDPOINT?.trim());
+}
 
 /** True when a Vercel Blob store is connected to the project. */
 export function hasBlobCredentials(env: EnvSource = process.env): boolean {
@@ -25,17 +30,29 @@ export function resolveStorageDriver(
 ): StorageDriver {
   const configuredDriver = env.STORAGE_DRIVER?.trim().toLowerCase();
 
-  if (configuredDriver === "blob" || configuredDriver === "local") {
+  if (
+    configuredDriver === "blob" ||
+    configuredDriver === "local" ||
+    configuredDriver === "s3"
+  ) {
     return configuredDriver;
   }
 
   if (configuredDriver) {
     throw new Error(
-      `Unknown STORAGE_DRIVER "${configuredDriver}". Use "blob" or "local", or leave it unset.`,
+      `Unknown STORAGE_DRIVER "${configuredDriver}". Use "blob", "s3" or "local", or leave it unset.`,
     );
   }
 
-  return hasBlobCredentials(env) || env.VERCEL === "1" ? "blob" : "local";
+  if (hasBlobCredentials(env)) {
+    return "blob";
+  }
+
+  if (hasS3Credentials(env)) {
+    return "s3";
+  }
+
+  return env.VERCEL === "1" ? "blob" : "local";
 }
 
 /**
