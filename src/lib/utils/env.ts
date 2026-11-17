@@ -272,7 +272,9 @@ export function getEnv(env: EnvSource = process.env) {
     },
     email: {
       apiKey: readEnv(env, "RESEND_API_KEY"),
-      senderAddress: readEnv(env, "RESEND_FROM_EMAIL"),
+      brevoApiKey: readEnv(env, "BREVO_API_KEY"),
+      senderAddress:
+        readEnv(env, "RESEND_FROM_EMAIL") ?? readEnv(env, "BREVO_FROM_EMAIL"),
       supportAddress: readEnv(env, "SUPPORT_EMAIL"),
     },
     internal: {

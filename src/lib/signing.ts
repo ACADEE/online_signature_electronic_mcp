@@ -1150,7 +1150,7 @@ async function sendCompletionEmails(input: {
       filename: `${fileNameStem} - certificate.pdf`,
     },
   ];
-  const attach = fitsAsAttachments(attachments);
+  const attach = fitsAsAttachments(attachments, process.env);
   const senderName = normalizeSenderName(input.sender);
   const issuedAt = Math.floor(Date.now() / 1000);
   const branding = await getBranding();

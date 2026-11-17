@@ -18,7 +18,7 @@ const EMAIL_ENV_KEYS = ["RESEND_API_KEY"] as const;
 const DEFAULT_CAPTURE_DIR = ".data/outbox";
 const DEFAULT_CAPTURE_SENDER_ADDRESS = "dev@signudoc.localhost";
 
-export type EmailDriver = "capture" | "resend";
+export type EmailDriver = "brevo" | "capture" | "resend";
 
 export type EmailAttachment = {
   content: Uint8Array;
@@ -33,12 +33,21 @@ export type EmailAttachment = {
  */
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
+/** Brevo allows about 4 MB of attachments per transactional message. */
+export const BREVO_MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
+
 export function fitsAsAttachments(
   attachments: readonly EmailAttachment[],
+  env: EnvSource = process.env,
 ): boolean {
+  const limit =
+    env.EMAIL_DRIVER?.trim().toLowerCase() === "brevo"
+      ? BREVO_MAX_ATTACHMENT_BYTES
+      : MAX_ATTACHMENT_BYTES;
+
   return (
     attachments.reduce((total, item) => total + item.content.byteLength, 0) <=
-    MAX_ATTACHMENT_BYTES
+    limit
   );
 }
 
@@ -189,13 +198,123 @@ export function resolveEmailDriver(env: EnvSource = process.env): EmailDriver {
     return "resend";
   }
 
-  if (configuredDriver === "capture" || configuredDriver === "resend") {
+  if (
+    configuredDriver === "brevo" ||
+    configuredDriver === "capture" ||
+    configuredDriver === "resend"
+  ) {
     return configuredDriver;
   }
 
   throw new Error(
-    `Unknown EMAIL_DRIVER "${configuredDriver}". Use "resend" or "capture".`,
+    `Unknown EMAIL_DRIVER "${configuredDriver}". Use "resend", "brevo" or "capture".`,
   );
+}
+
+const BREVO_SEND_URL = "https://api.brevo.com/v3/smtp/email";
+
+/** "Acme <sign@acme.com>" becomes { name: "Acme", email: "sign@acme.com" }. */
+function parseBrevoAddress(value: string): { email: string; name?: string } {
+  const match = /^(.*)<([^<>]+)>\s*$/.exec(value);
+
+  if (!match) {
+    return { email: value.trim() };
+  }
+
+  const name = match[1]!.trim().replace(/^"|"$/g, "");
+
+  return name ? { email: match[2]!.trim(), name } : { email: match[2]!.trim() };
+}
+
+/** Sends through Brevo's transactional API, one request per message. */
+function createBrevoEmailService(
+  env: EnvSource,
+  resolveAddresses: () => Promise<EmailAddresses>,
+  wait: (milliseconds: number) => Promise<void>,
+): EmailService {
+  assertServiceConfig("email", ["BREVO_API_KEY"], env);
+
+  const apiKey = getEnv(env).email.brevoApiKey!;
+
+  async function sendOne(
+    message: TransactionalEmailMessage,
+  ): Promise<EmailDeliveryResult> {
+    const config = await resolveAddresses();
+    const replyTo = message.replyTo ?? config.supportAddress ?? undefined;
+    const body = JSON.stringify({
+      ...(message.attachments?.length
+        ? {
+            attachment: message.attachments.map((attachment) => ({
+              content: Buffer.from(attachment.content).toString("base64"),
+              name: attachment.filename,
+            })),
+          }
+        : {}),
+      htmlContent: message.htmlBody,
+      ...(replyTo ? { replyTo: parseBrevoAddress(replyTo) } : {}),
+      sender: parseBrevoAddress(config.senderAddress),
+      subject: message.subject,
+      tags: [message.template],
+      textContent: message.textBody,
+      to: [{ email: message.to }],
+    });
+
+    for (let attempt = 0; ; attempt += 1) {
+      const response = await fetch(BREVO_SEND_URL, {
+        body,
+        headers: {
+          accept: "application/json",
+          "api-key": apiKey,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+
+      if (response.ok) {
+        const data = (await response.json().catch(() => null)) as {
+          messageId?: string;
+        } | null;
+
+        return {
+          accepted: [message.to],
+          messageId: data?.messageId,
+          rejected: [],
+        };
+      }
+
+      if (response.status === 429 && attempt < RATE_LIMIT_RETRIES) {
+        await wait(
+          rateLimitWaitMs({
+            "retry-after": response.headers.get("retry-after") ?? "",
+          }),
+        );
+        continue;
+      }
+
+      const error = (await response.json().catch(() => null)) as {
+        message?: string;
+      } | null;
+
+      throw new Error(
+        error?.message
+          ? `Brevo: ${error.message}`
+          : `Brevo rejected the email (HTTP ${String(response.status)}).`,
+      );
+    }
+  }
+
+  return {
+    send: (message) => sendOne(message),
+    async sendBatch(messages) {
+      const results: EmailDeliveryResult[] = [];
+
+      for (const message of messages) {
+        results.push(await sendOne(message));
+      }
+
+      return results;
+    },
+  };
 }
 
 /**
@@ -304,6 +423,10 @@ export function createEmailService({
 }: CreateEmailServiceOptions = {}): EmailService {
   if (!resendClient && resolveEmailDriver(env) === "capture") {
     return createCaptureEmailService(env, resolveAddresses);
+  }
+
+  if (!resendClient && resolveEmailDriver(env) === "brevo") {
+    return createBrevoEmailService(env, resolveAddresses, wait);
   }
 
   if (!resendClient) {

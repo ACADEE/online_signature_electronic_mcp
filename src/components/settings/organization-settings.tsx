@@ -642,6 +642,14 @@ function describeEmailStatus(status: EmailStatus): {
         ready: true,
         title: "Emails are being captured, not sent",
       };
+    case "brevo":
+      return {
+        lines: [
+          `Emails are sent through Brevo from ${status.senderAddress}. That address must be a verified sender in your Brevo account. Send yourself a test email to check.`,
+        ],
+        ready: true,
+        title: "Email goes through Brevo",
+      };
     case "missing_key":
       return status.onVercel
         ? {

@@ -38,6 +38,8 @@ export type EmailDnsRecord = {
 export type EmailStatus =
   /** Development: messages are written to disk, not sent. */
   | { state: "capture" }
+  /** Sending through Brevo's API. Its sender and domain are checked in Brevo. */
+  | { state: "brevo"; senderAddress: string }
   /**
    * No Resend API key, so nothing can be sent. On Vercel the steps to fix it
    * are Vercel's, which the page spells out.
@@ -389,6 +391,22 @@ async function inspectEmail({
     };
   }
 
+  if (!domainsClient && resolveEmailDriver(env) === "brevo") {
+    const resolved = settings ?? (await getSettings(env));
+
+    return {
+      client: null,
+      domainId: null,
+      markReady: noop,
+      status: {
+        senderAddress: extractEmailAddress(
+          buildEmailAddresses(resolved).senderAddress,
+        ),
+        state: "brevo",
+      },
+    };
+  }
+
   const client = domainsClient ?? createDomainsClient(env);
 
   if (!client) {
@@ -557,7 +575,9 @@ export function emailNeedsAttention(
   env: EnvSource = process.env,
 ): boolean {
   try {
-    if (resolveEmailDriver(env) === "capture") {
+    const driver = resolveEmailDriver(env);
+
+    if (driver === "capture" || driver === "brevo") {
       return false;
     }
   } catch {
